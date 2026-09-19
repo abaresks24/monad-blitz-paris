@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { parseEther } from "viem";
-import { serverPublic, gmWrite, cfg, CONTRACT, ENTRY_FEE_MON, hostTokenFor } from "@/lib/server";
+import { parseEther, decodeEventLog } from "viem";
+import { serverPublic, gmWrite, cfg, FraudeRERB_ABI, CONTRACT, ENTRY_FEE_MON, hostTokenFor } from "@/lib/server";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -17,8 +17,21 @@ export async function POST(req: NextRequest) {
     const boardDuration = clamp(Number(b.boardDuration ?? 20), 5, 60);
     const fee = parseEther(ENTRY_FEE_MON);
 
-    await gmWrite("createGame", [numWagons, 5, numControllers, numStations, boardDuration, fee]);
-    const gid = ((await serverPublic.readContract({ ...cfg(), functionName: "gameCount", args: [] })) as bigint).toString();
+    const hash = await gmWrite("createGame", [numWagons, 5, numControllers, numStations, boardDuration, fee]);
+    const rcpt = await serverPublic.waitForTransactionReceipt({ hash });
+    // read the exact new gameId from the GameCreated event (robust to concurrent creates)
+    let gid = "";
+    for (const log of rcpt.logs) {
+      if (log.address.toLowerCase() !== CONTRACT.toLowerCase()) continue;
+      try {
+        const ev = decodeEventLog({ abi: FraudeRERB_ABI, data: log.data, topics: log.topics });
+        if (ev.eventName === "GameCreated") {
+          gid = (ev.args as any).gameId.toString();
+          break;
+        }
+      } catch {}
+    }
+    if (!gid) gid = ((await serverPublic.readContract({ ...cfg(), functionName: "gameCount", args: [] })) as bigint).toString();
 
     const hostToken = hostTokenFor(gid);
     return NextResponse.json({ ok: true, gameId: gid, hostToken, entryFee: ENTRY_FEE_MON, numWagons, numControllers, numStations });
