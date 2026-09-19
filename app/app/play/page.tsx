@@ -3,7 +3,20 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { parseEther, type Hex } from "viem";
 import { getBurner, getNick, saveNick, markJoined, hasJoined, saveRole, getRole } from "@/lib/burner";
-import { walletFor } from "@/lib/chain";
+import { walletFor, publicClient } from "@/lib/chain";
+
+// Fund the burner, then WAIT until the balance is actually visible on-chain (Monad nodes lag a
+// beat after a transfer). Without this, createGame/join fire before the gas has landed and revert.
+async function ensureFunded(address: `0x${string}`, minWei: bigint) {
+  await fetch("/api/fund", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ address }) });
+  for (let i = 0; i < 30; i++) {
+    try {
+      const b = (await publicClient.getBalance({ address })) as bigint;
+      if (b >= minWei) return;
+    } catch {}
+    await new Promise((r) => setTimeout(r, 500));
+  }
+}
 import { Role } from "@/lib/game";
 import { useGame, useCountdown, type Snap } from "@/lib/useGame";
 import { sendCreate, sendJoin, sendStart, sendBoard } from "@/lib/tx";
@@ -68,17 +81,15 @@ function Entry({ burner, state }: { burner: { pk: Hex; address: `0x${string}` };
   const gid = String(state.gameId);
   const feeMon = g.entryFee ? (Number(g.entryFee) / 1e18).toFixed(4) : "0.001";
 
-  async function fundAndJoin(gameId: string, fee: bigint) {
-    await fetch("/api/fund", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ address: burner.address }) });
-    await sendJoin(burner.pk, BigInt(gameId), nick.trim(), fee);
-    markJoined(gameId);
-  }
-
   async function doJoin() {
     setErr(""); if (!nick.trim()) return setErr("Choisis un pseudo");
-    setBusy("Embarquement…"); saveNick(nick.trim()); startMusic(); setSfxEnabled(true);
+    setBusy("Financement du wallet…"); saveNick(nick.trim()); startMusic(); setSfxEnabled(true);
     try {
-      await fundAndJoin(gid, BigInt(g.entryFee));
+      const fee = BigInt(g.entryFee || "1000000000000000");
+      await ensureFunded(burner.address, fee + parseEther("0.03"));
+      setBusy("Embarquement…");
+      await sendJoin(burner.pk, BigInt(gid), nick.trim(), fee);
+      markJoined(gid);
     } catch (e: any) { setErr(e?.shortMessage ?? e?.message ?? "échec"); } finally { setBusy(""); }
   }
 
@@ -87,8 +98,8 @@ function Entry({ burner, state }: { burner: { pk: Hex; address: `0x${string}` };
     setBusy("Financement du wallet…"); saveNick(nick.trim()); startMusic(); setSfxEnabled(true);
     try {
       const fee = BigInt(g.entryFee || "1000000000000000"); // 0.001 MON default
-      // fund the burner so IT can create + join (the player is the on-chain creator)
-      await fetch("/api/fund", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ address: burner.address }) });
+      // fund the burner and WAIT for the balance before it creates + joins (it's the creator)
+      await ensureFunded(burner.address, fee + parseEther("0.06"));
       setBusy("Création de la partie…");
       const newId = await sendCreate(burner.pk, { numWagons: wagons, numControllers: controllers, numStations: stations, boardDuration: 20, fee });
       setBusy("Embarquement…");

@@ -13,7 +13,8 @@ async function write(pk: Hex, fn: string, args: any[], value?: bigint) {
     value,
     account: wallet.account!,
   } as any);
-  await publicClient.waitForTransactionReceipt({ hash });
+  const rcpt = await publicClient.waitForTransactionReceipt({ hash });
+  if (rcpt.status === "reverted") throw new Error("transaction reverted");
   return hash;
 }
 
