@@ -12,10 +12,13 @@ async function ensureFunded(address: `0x${string}`, minWei: bigint) {
   for (let i = 0; i < 30; i++) {
     try {
       const b = (await publicClient.getBalance({ address })) as bigint;
-      if (b >= minWei) return;
+      if (b >= minWei) break;
     } catch {}
     await new Promise((r) => setTimeout(r, 500));
   }
+  // let the funding tx propagate across RPC nodes before the wallet spends (avoids
+  // "insufficient balance" from a node that hasn't synced yet)
+  await new Promise((r) => setTimeout(r, 2500));
 }
 import { Role, stationLabels } from "@/lib/game";
 import { useGame, useCountdown, type Snap } from "@/lib/useGame";
@@ -409,8 +412,26 @@ function EndView({ state, meIndex, isCreator, onSettle, busy }: { state: Snap; m
         </button>
       )}
       {!settled && !isCreator && <div className="text-cream/60">En attente du partage du pot…</div>}
-      {settled && <div className="text-cream/70">{state.survivorAddrs?.length}/{state.game.playerCount} survivant(s) se partagent {Number(state.potMon).toFixed(3)} MON</div>}
-      <a href="/play?new=1" className="btn bg-blue text-cream text-xl px-8 py-4 rounded-xl mt-4">NOUVELLE PARTIE</a>
+
+      {/* winners */}
+      <div className="w-full max-w-sm">
+        <div className="riso text-cream text-xl mb-2">GAGNANTS</div>
+        <div className="flex flex-wrap gap-2 justify-center">
+          {state.roster.filter((_, i) => state.alive[i]).map((r) => (
+            <div key={r.addr} className="flex flex-col items-center w-16">
+              <Passenger seed={r.nick} size={40} />
+              <span className="text-cream text-[10px] truncate w-full text-center">{r.nick}</span>
+            </div>
+          ))}
+          {state.survivors === 0 && <div className="text-vermilion">Personne n&apos;a survécu…</div>}
+        </div>
+      </div>
+      {settled && <div className="text-cream/70 text-sm">{state.survivorAddrs?.length}/{state.game.playerCount} survivant(s) • {Number(state.potMon).toFixed(3)} MON de pot partagés</div>}
+
+      <div className="flex flex-col gap-2 w-full max-w-xs mt-2">
+        <a href="/play?new=1" className="btn bg-blue text-cream text-xl px-8 py-3 rounded-xl">NOUVELLE PARTIE</a>
+        <a href="/" className="btn bg-cream text-ink text-lg px-8 py-3 rounded-xl">RETOUR À L&apos;ACCUEIL</a>
+      </div>
     </motion.div>
   );
 }

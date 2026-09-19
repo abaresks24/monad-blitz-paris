@@ -18,7 +18,7 @@ async function write(pk: Hex, fn: string, args: any[], value?: bigint) {
   return hash;
 }
 
-async function withRetry<T>(fn: () => Promise<T>, tries = 3): Promise<T> {
+async function withRetry<T>(fn: () => Promise<T>, tries = 7): Promise<T> {
   let last: any;
   for (let i = 0; i < tries; i++) {
     try {
@@ -27,7 +27,10 @@ async function withRetry<T>(fn: () => Promise<T>, tries = 3): Promise<T> {
       last = e;
       const m = String(e?.shortMessage ?? e?.message ?? e);
       if (/Already|WagonFull|NotBoardingWindow|WrongFee/.test(m)) throw e;
-      await new Promise((r) => setTimeout(r, 400 * (i + 1)));
+      // "insufficient balance" here almost always means a pool node hasn't synced the funding tx
+      // yet — wait longer so it catches up rather than failing the player.
+      const laggy = /insufficient|not be found|nonce/i.test(m);
+      await new Promise((r) => setTimeout(r, (laggy ? 1500 : 500) * (i + 1)));
     }
   }
   throw last;
