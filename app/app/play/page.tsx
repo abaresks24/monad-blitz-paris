@@ -21,6 +21,7 @@ import { Role } from "@/lib/game";
 import { useGame, useCountdown, type Snap } from "@/lib/useGame";
 import { sendCreate, sendJoin, sendStart, sendBoard } from "@/lib/tx";
 import { Passenger, Controleur, TicketMark } from "@/components/art";
+import { QRCode } from "@/components/QRCode";
 import { startMusic, stopMusic, isMusicOn, setSfxEnabled, playBoard, playEliminate, playSurvive, playTick } from "@/lib/sound";
 
 function urlGameId(): string | number {
@@ -72,9 +73,10 @@ function Entry({ burner, state }: { burner: { pk: Hex; address: `0x${string}` };
   const [busy, setBusy] = useState("");
   const [err, setErr] = useState("");
   const [mode, setMode] = useState<"pick" | "create">("pick");
-  const [wagons, setWagons] = useState(4);
+  const [wagons, setWagons] = useState(5);
   const [controllers, setControllers] = useState(2);
   const [stations, setStations] = useState(4);
+  const maxP = Math.min(wagons * 3, 40);
 
   const g = state.game;
   const joinable = g.started === false && g.creator !== "0x0000000000000000000000000000000000000000";
@@ -137,10 +139,10 @@ function Entry({ burner, state }: { burner: { pk: Hex; address: `0x${string}` };
 
       {mode === "create" && (
         <div className="card p-4 w-80 space-y-3">
-          <Stepper label="Wagons" v={wagons} set={(n) => { setWagons(n); if (controllers > n * 3 - 1) setControllers(Math.max(1, n * 3 - 1)); }} min={2} max={8} />
-          <Stepper label="Contrôleurs" v={controllers} set={setControllers} min={1} max={wagons * 3 - 1} />
+          <Stepper label="Wagons" v={wagons} set={(n) => { setWagons(n); if (controllers > n * 3 - 1) setControllers(Math.max(1, n * 3 - 1)); }} min={3} max={20} />
+          <Stepper label="Contrôleurs" v={controllers} set={setControllers} min={1} max={Math.min(maxP - 1, wagons * 3 - 1)} />
           <Stepper label="Stations" v={stations} set={setStations} min={1} max={10} />
-          <div className="text-xs text-ink/70">Jusqu&apos;à {wagons * 3} joueurs • 5 par wagon max • mise {feeMon} MON</div>
+          <div className="text-xs text-ink/70">Jusqu&apos;à {maxP} joueurs (2 min) • 5 par wagon max • mise {feeMon} MON</div>
           <div className="flex gap-2">
             <button onClick={() => setMode("pick")} className="btn bg-cream text-ink px-4 py-2 rounded-lg text-sm flex-1">Retour</button>
             <button onClick={doCreate} disabled={!!busy} className="btn bg-vermilion text-cream px-4 py-2 rounded-lg flex-[2]">Créer & rejoindre</button>
@@ -268,25 +270,33 @@ function Game({ burner, state, meIndex }: { burner: { pk: Hex; address: `0x${str
 }
 
 function Lobby({ state, isCreator, onStart, busy, err }: { state: Snap; isCreator: boolean; onStart: () => void; busy: string; err: string }) {
+  const base = typeof window !== "undefined" ? window.location.origin : "";
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col items-center gap-4 py-4">
-      <div className="riso text-cream text-3xl">Sur le quai…</div>
-      <div className="text-cream/70">{state.game.playerCount}/{state.maxPlayers} voyageurs • {state.game.numWagons} wagons • {state.game.numStations} stations</div>
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col items-center gap-3 py-3">
+      {isCreator && (
+        <>
+          <div className="riso text-cream text-2xl">Fais scanner pour rejoindre</div>
+          <div className="card p-3 rounded-2xl"><QRCode text={`${base}/play?g=${state.gameId}`} size={200} /></div>
+          <div className="text-cream/60 text-sm">partie #{state.gameId}</div>
+        </>
+      )}
+      <div className="riso text-yellow text-4xl">{state.game.playerCount}/{state.maxPlayers} JOUEURS</div>
+      <div className="text-cream/60 text-xs">{state.game.numWagons} wagons • {state.game.numControllers} contrôleurs • {state.game.numStations} stations</div>
       <div className="flex flex-wrap gap-2 justify-center max-w-md">
         {state.roster.map((r) => (
-          <div key={r.addr} className="flex flex-col items-center w-16">
-            <Passenger seed={r.nick} size={44} />
-            <span className="text-cream text-xs truncate w-full text-center">{r.nick}</span>
+          <div key={r.addr} className="flex flex-col items-center w-14">
+            <Passenger seed={r.nick} size={38} />
+            <span className="text-cream text-[10px] truncate w-full text-center">{r.nick}</span>
           </div>
         ))}
       </div>
       {isCreator ? (
-        <div className="flex flex-col items-center gap-2 mt-2">
-          <a href={`/screen?g=${state.gameId}`} target="_blank" rel="noreferrer" className="btn bg-blue text-cream text-sm px-4 py-2 rounded-lg">Ouvrir le grand écran ↗</a>
-          <button onClick={onStart} disabled={!!busy || state.game.playerCount < 2} className="btn bg-green text-ink text-2xl px-8 py-4 rounded-xl">
-            {busy ? "…" : "LANCER LE TRAIN"}
+        <div className="flex flex-col items-center gap-2 mt-1 w-full">
+          <button onClick={onStart} disabled={!!busy || state.game.playerCount < 2} className="btn bg-green text-ink text-2xl px-8 py-4 rounded-xl w-full max-w-xs">
+            {busy ? "…" : "LANCER LA PARTIE"}
           </button>
-          {state.game.playerCount < 2 && <div className="text-cream/60 text-xs">Il faut au moins 2 voyageurs</div>}
+          {state.game.playerCount < 2 && <div className="text-cream/60 text-xs">Il faut au moins 2 joueurs</div>}
+          <a href={`/screen?g=${state.gameId}`} target="_blank" rel="noreferrer" className="text-blue underline text-xs">Ouvrir le grand écran ↗</a>
           {err && <div className="text-vermilion text-sm font-bold">{err}</div>}
         </div>
       ) : (
