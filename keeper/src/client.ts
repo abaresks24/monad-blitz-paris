@@ -1,9 +1,9 @@
 import { formatEther, parseEther, type Address, type Hex } from "viem";
 import { publicClient, walletFor, monadTestnet } from "./chain.js";
-import { FraudeRERB_ABI } from "./game.js";
+import { RERB_ABI } from "./game.js";
 
 export function contractCfg(address: Address) {
-  return { address, abi: FraudeRERB_ABI } as const;
+  return { address, abi: RERB_ABI } as const;
 }
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

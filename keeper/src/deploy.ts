@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { formatEther } from "viem";
 import { publicClient, requireGmKey, walletFor, gmAccount, CHAIN_ID, RPC_URL } from "./chain.js";
-import { FraudeRERB_ABI, loadBytecode } from "./game.js";
+import { RERB_ABI, loadBytecode } from "./game.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -20,11 +20,11 @@ async function main() {
   console.log(`Deployer: ${gm.address}  balance: ${formatEther(bal)} MON  (chain ${CHAIN_ID})`);
   if (bal === 0n) throw new Error("Deployer balance is 0 — fund via blitz.devnads.com");
 
-  console.log("Deploying FraudeRERB...");
-  const hash = await wallet.deployContract({ abi: FraudeRERB_ABI, bytecode: loadBytecode(), args: [] });
+  console.log("Deploying RERBSurvival...");
+  const hash = await wallet.deployContract({ abi: RERB_ABI, bytecode: loadBytecode(), args: [] });
   const rcpt = await publicClient.waitForTransactionReceipt({ hash });
   const address = rcpt.contractAddress!;
-  console.log(`✅ FraudeRERB @ ${address}  (block ${rcpt.blockNumber})`);
+  console.log(`✅ RERBSurvival @ ${address}  (block ${rcpt.blockNumber})`);
 
   const out = {
     chainId: CHAIN_ID,

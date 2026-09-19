@@ -1,125 +1,123 @@
 /**
- * Full end-to-end simulation of a 20-bot game from the terminal.
- * Deploys a fresh contract, creates a game, fills it with bots, plays every station,
- * resolves, finishes and prints the leaderboard + awards. This is the proof the core works.
- *
- * Works against Monad Testnet (PRIVATE_KEY funded) OR a local anvil:
- *   anvil &
- *   MONAD_RPC_URL=http://127.0.0.1:8545 PRIVATE_KEY=<anvil key 0> npm run simulate -- --n 20 --stations 4
- *
- * Flags: --n <bots> --stations <k> --commit <s> --reveal <s>
+ * V2 end-to-end simulation of a survival game (deploy → bots pay & join → board → settle → payout).
+ *   anvil --block-time 1 &
+ *   MONAD_RPC_URL=http://127.0.0.1:8545 MONAD_CHAIN_ID=31337 PRIVATE_KEY=<anvil key0> npm run simulate -- --wagons 4 --stations 4 --n 12
  */
-import "dotenv/config";
-import { formatEther } from "viem";
+import { formatEther, parseEther, encodeFunctionData, type Hex, type Address } from "viem";
+import { privateKeyToAccount, generatePrivateKey } from "viem/accounts";
 import { publicClient, walletFor, requireGmKey, gmAccount, CHAIN_ID, RPC_URL } from "./chain.js";
-import { FraudeRERB_ABI, loadBytecode, Role } from "./game.js";
-import { readContract, waitUntilChain, writeWithRetry } from "./client.js";
-import { makeBots } from "./bots.js";
-import {
-  fundAndRegisterBots,
-  botsCommit,
-  botsReveal,
-  resolveStation,
-  finishGame,
-  readGame,
-  stationTimes,
-  printResults,
-} from "./engine.js";
+import { RERB_ABI, loadBytecode, assignRoles, roleSaltFor, roleCommitsFor, Role } from "./game.js";
+import { readContract, writeWithRetry, waitUntilChain, batchFromGM, mapLimit } from "./client.js";
+import { simulate as simEliminations } from "./sim.js";
 
 function arg(name: string, def: number) {
   const i = process.argv.indexOf(`--${name}`);
   return i >= 0 ? Number(process.argv[i + 1]) : def;
 }
 
-const N = arg("n", 20);
+const WAGONS = arg("wagons", 4);
+const CAP = arg("cap", 5);
+const CONTROLLERS = arg("controllers", 2);
 const STATIONS = arg("stations", 4);
-const COMMIT = arg("commit", 12);
-const REVEAL = arg("reveal", 5);
+const BOARD_DUR = arg("board", 12);
+const N = Math.min(arg("n", WAGONS * 3), WAGONS * 3);
+const FEE = parseEther(String(process.env.ENTRY_FEE ?? "0.001"));
 const SECRET = process.env.MASTER_SECRET ?? "blitz-demo-secret";
-const DENOM = Number(process.env.ROLE_DENOM ?? 8);
-const FUND = process.env.BURNER_FUND_MON ?? "0.02";
+
+const NAMES = ["Zizou","Kevin92","Malaury","Nadia","Poucave","Gérard","Momo","Clara","Babtou","Yasmina","Fraudinho","Turnstile","Sonia","Dédé","Amine","Fatou","Bébert","Wesh","Djamel","Enzo","Kylian","Ginette","Rocco","Naïma"];
+
+function seededWagon(gameId: bigint, addr: Address, station: number): number {
+  let h = 0;
+  const s = `${gameId}-${addr}-${station}`;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h % WAGONS;
+}
 
 async function main() {
-  console.log(`\n🚇 === Fraude sur le RER B — SIMULATION (${N} bots, ${STATIONS} stations) ===`);
+  console.log(`\n🚇 RER B — SURVIE (sim) — ${N} bots, ${WAGONS} wagons, ${CONTROLLERS} contrôleurs, ${STATIONS} stations`);
   console.log(`RPC ${RPC_URL} (chain ${CHAIN_ID})`);
   const gmKey = requireGmKey();
   const gm = gmAccount();
   const wallet = walletFor(gmKey);
-  const bal = await publicClient.getBalance({ address: gm.address });
-  console.log(`GM ${gm.address}  balance ${formatEther(bal)} MON`);
-  if (bal === 0n) throw new Error("GM balance 0 — fund it (blitz.devnads.com) or use anvil.");
+  console.log(`GM ${gm.address}  ${formatEther(await publicClient.getBalance({ address: gm.address }))} MON`);
 
-  // 1. Deploy fresh
-  console.log(`\nDeploying FraudeRERB...`);
-  const dh = await wallet.deployContract({ abi: FraudeRERB_ABI, bytecode: loadBytecode(), args: [] });
+  // deploy
+  const dh = await wallet.deployContract({ abi: RERB_ABI, bytecode: loadBytecode(), args: [] });
   const drc = await publicClient.waitForTransactionReceipt({ hash: dh });
   const addr = drc.contractAddress!;
-  console.log(`  @ ${addr}`);
+  console.log(`RERBSurvival @ ${addr}`);
 
-  // 2. Create game
-  await writeWithRetry(gmKey, addr, "createGame", [STATIONS, COMMIT, REVEAL], { label: "createGame" });
+  // create game
+  await writeWithRetry(gmKey, addr, "createGame", [WAGONS, CAP, CONTROLLERS, STATIONS, BOARD_DUR, FEE]);
   const gameId = (await readContract(addr, "gameCount", [])) as bigint;
-  console.log(`  gameId = ${gameId}`);
+  console.log(`game #${gameId}, mise ${formatEther(FEE)} MON`);
 
-  // 3. Bots
-  const bots = makeBots(gameId, N, SECRET, DENOM);
-  const nCtrl = bots.filter((b) => b.role === Role.CONTROLEUR).length;
-  console.log(`  ${bots.length} bots (${nCtrl} contrôleurs, ${bots.length - nCtrl} passagers)`);
-  await fundAndRegisterBots(gmKey, addr, gameId, bots, SECRET, DENOM, FUND);
+  // bots: fund then join (each pays the fee)
+  const bots = Array.from({ length: N }, (_, i) => {
+    const key = generatePrivateKey();
+    return { key, address: privateKeyToAccount(key).address as Address, nick: NAMES[i % NAMES.length] + (i >= NAMES.length ? i : "") };
+  });
+  console.log(`funding ${N} bots...`);
+  await batchFromGM(gmKey, bots.map((b) => ({ to: b.address, value: FEE + parseEther("0.01") })));
+  console.log(`bots joining (paying ${formatEther(FEE)} each)...`);
+  await mapLimit(bots, 5, (b) => writeWithRetry(b.key, addr, "join", [gameId, b.nick], { value: FEE, label: `join ${b.nick}` }));
 
-  // 4. Start
-  await writeWithRetry(gmKey, addr, "startGame", [gameId], { label: "startGame" });
-  const g = await readGame(addr, gameId);
-  console.log(`  started; stationDuration=${g.stationDuration}s, gameEnd in ${g.gameEnd - Math.floor(Date.now() / 1000)}s`);
+  const players = (await readContract(addr, "getPlayers", [gameId])) as Address[];
+  console.log(`${players.length} joueurs à bord, pot = ${formatEther(FEE * BigInt(players.length))} MON`);
 
-  // 5. Play stations
+  // start with rank-based roles
+  const commits = roleCommitsFor(gameId, players, SECRET, CONTROLLERS);
+  await writeWithRetry(gmKey, addr, "startGame", [gameId, commits]);
+  const roles = assignRoles(gameId, players, SECRET, CONTROLLERS);
+  console.log(`démarré. contrôleurs: ${players.filter((_, i) => roles[i] === Role.CONTROLEUR).length}`);
+
+  // play stations
+  const boardKeyByAddr = new Map(bots.map((b) => [b.address.toLowerCase(), b.key] as const));
   for (let s = 0; s < STATIONS; s++) {
-    const t = await stationTimes(addr, gameId, s);
-    console.log(`\n--- Station ${s + 1}/${STATIONS} ---`);
-    await waitUntilChain(t.commitStart, `commit st${s + 1}`);
-    const committed = await botsCommit(addr, gameId, s, bots, SECRET);
-    console.log(`  ✓ ${committed}/${bots.length} committed`);
-
-    await waitUntilChain(t.commitEnd, `reveal st${s + 1}`);
-    const revealed = await botsReveal(addr, gameId, s, bots, SECRET);
-    console.log(`  ✓ ${revealed}/${bots.length} revealed`);
-
-    await waitUntilChain(t.revealEnd, `resolve st${s + 1}`);
-    await resolveStation(gmKey, addr, gameId, s);
-    const [resolved, inspected, , , outcomes] = (await readContract(addr, "getStationResult", [
-      gameId,
-      s,
-    ])) as [boolean, number[], string[], number[], number[]];
-    const caught = (outcomes as number[]).filter((o) => o === 3).length;
-    console.log(`  🎯 resolved — cars inspectés: [${inspected.join(",")}], ${caught} fraudeur(s) pincé(s)`);
+    const [bStart] = (await readContract(addr, "stationWindow", [gameId, s])) as bigint[];
+    await waitUntilChain(Number(bStart), `board st${s + 1}`);
+    // who's still alive going into station s? run the sim over the prior stations only
+    const prior = await fetchBoarding(addr, gameId, s, players);
+    const alive = s === 0 ? players.map(() => true) : simEliminations(gameId, WAGONS, s, players, roles as number[], prior).alive;
+    const boarders = players.map((p, i) => ({ p, i })).filter(({ i }) => alive[i]);
+    const c = await mapLimit(boarders, 5, ({ p }) => {
+      const key = boardKeyByAddr.get(p.toLowerCase());
+      if (!key) return Promise.resolve(null);
+      return writeWithRetry(key, addr, "board", [gameId, s, seededWagon(gameId, p, s)], { label: `board st${s}` });
+    });
+    console.log(`  station ${s + 1}: ${c.filter(Boolean).length} montées`);
   }
 
-  // 6. Finish + results
-  await waitUntilChain(g.gameEnd, "gameEnd");
-  console.log(`\nFinishing game (revealing roles)...`);
-  await finishGame(gmKey, addr, gameId, SECRET, DENOM);
+  // settle
+  const [, , , , , , , , , , , , , gameEnd] = (await readContract(addr, "getGame", [gameId])) as any[];
+  await waitUntilChain(Number(gameEnd), "gameEnd");
+  const salts = players.map((p) => roleSaltFor(gameId, p, SECRET));
+  console.log(`\nrèglement...`);
+  await writeWithRetry(gmKey, addr, "settle", [gameId, roles, salts]);
 
-  const rows = await printResults(addr, gameId);
+  const survivors = (await readContract(addr, "getSurvivors", [gameId])) as Address[];
+  const share = (await readContract(addr, "payoutPerSurvivor", [gameId])) as bigint;
+  const nick = (a: Address) => bots.find((b) => b.address.toLowerCase() === a.toLowerCase())?.nick ?? a.slice(0, 6);
+  console.log(`\n===== TERMINUS CDG =====`);
+  console.log(`survivants: ${survivors.length}/${players.length}  •  part: ${formatEther(share)} MON chacun`);
+  survivors.forEach((a) => {
+    const i = players.findIndex((p) => p.toLowerCase() === a.toLowerCase());
+    console.log(`  🏆 ${nick(a)} ${roles[i] === Role.CONTROLEUR ? "🎩" : ""}`);
+  });
+  console.log(`\n✅ SIM OK — contract ${addr}, game ${gameId}`);
+}
 
-  // Awards
-  const passengers = rows.filter((r) => r.role === Role.PASSAGER);
-  const controllers = rows.filter((r) => r.role === Role.CONTROLEUR);
-  console.log("\n===== PALMARÈS =====");
-  if (passengers.length) {
-    const roi = passengers[0];
-    console.log(`👑 Roi de la fraude : ${roi.nick} (${roi.pts} pts)`);
+/** Fetch boarding records for stations [0, uptoExclusive) as boarding[station][playerIndex]. */
+async function fetchBoarding(addr: Address, gameId: bigint, uptoExclusive: number, players: Address[]) {
+  const out: { boarded: boolean; wagon: number }[][] = [];
+  for (let s = 0; s < uptoExclusive; s++) {
+    const [, boarded, wagons] = (await readContract(addr, "getBoarding", [gameId, s])) as [Address[], boolean[], number[], number[]];
+    out[s] = players.map((_, i) => ({ boarded: boarded[i], wagon: Number(wagons[i]) }));
   }
-  if (controllers.length) {
-    const best = [...controllers].sort((a, b) => b.pts - a.pts)[0];
-    console.log(`🎩 Contrôleur de l'année : ${best.nick} (${best.pts} pts)`);
-  }
-  const loser = rows[rows.length - 1];
-  console.log(`😭 Pas de chance : ${loser.nick} (${loser.pts} pts)`);
-
-  console.log(`\n✅ SIMULATION COMPLETE — contract ${addr}, game ${gameId}`);
+  return out;
 }
 
 main().catch((e) => {
-  console.error("\n❌ SIMULATION FAILED:", e?.shortMessage ?? e?.message ?? e);
+  console.error("\n❌ SIM FAILED:", e?.shortMessage ?? e?.message ?? e);
   process.exit(1);
 });

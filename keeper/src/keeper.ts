@@ -1,155 +1,128 @@
 /**
- * Live-game keeper (run on the laptop during the demo).
- *   - creates (or attaches to) a game
- *   - fills it with bots up to N_BOTS and registers them
- *   - waits for the GM to press START in /admin (or auto-starts)
- *   - each station: drives the bots' commit + reveal, then resolves at the deadline
- *   - finishes the game and reveals roles
- *
- * Humans join independently via the web app's /api/join (same deterministic role scheme).
- * Bots persist to keeper/state so a restart never double-registers.
- *
- *   npm run keeper
- * Env: GAME_ID (optional), N_BOTS, STATIONS, COMMIT_DURATION, REVEAL_DURATION,
- *      AUTOSTART_SECONDS (0 = wait for admin), MASTER_SECRET, CONTRACT_ADDRESS
+ * V2 live keeper (laptop). Attaches to a game created in the app, fills it with bots (pay+join),
+ * waits for the host to press Lancer, drives the bots' boarding each station, then settles the pot.
+ *   GAME_ID=<id> N_BOTS=8 npm run keeper
  */
-import "dotenv/config";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { formatEther, type Address, type Hex } from "viem";
-import { publicClient, requireGmKey, gmAccount, RPC_URL, CHAIN_ID } from "./chain.js";
-import { Role } from "./game.js";
-import { readContract, writeWithRetry, waitUntilChain, chainNow, sleep } from "./client.js";
-import { makeBots, type Bot } from "./bots.js";
-import {
-  fundAndRegisterBots,
-  botsCommit,
-  botsReveal,
-  resolveStation,
-  finishGame,
-  readGame,
-  stationTimes,
-  printResults,
-} from "./engine.js";
+import { formatEther, parseEther, type Address, type Hex } from "viem";
+import { privateKeyToAccount, generatePrivateKey } from "viem/accounts";
+import { publicClient, requireGmKey, gmAccount, CHAIN_ID, RPC_URL } from "./chain.js";
+import { assignRoles, roleSaltFor, roleCommitsFor, Role } from "./game.js";
+import { readContract, writeWithRetry, waitUntilChain, batchFromGM, mapLimit, sleep } from "./client.js";
+import { simulate as simEliminations } from "./sim.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STATE_DIR = join(__dirname, "../state");
 
-const N_BOTS = Number(process.env.N_BOTS ?? 20);
-const STATIONS = Number(process.env.STATIONS ?? 4);
-const COMMIT = Number(process.env.COMMIT_DURATION ?? 12);
-const REVEAL = Number(process.env.REVEAL_DURATION ?? 5);
+const N_BOTS = Number(process.env.N_BOTS ?? 8);
 const SECRET = process.env.MASTER_SECRET ?? "blitz-demo-secret";
-const DENOM = Number(process.env.ROLE_DENOM ?? 8);
-const FUND = process.env.BURNER_FUND_MON ?? "0.02";
-const AUTOSTART = Number(process.env.AUTOSTART_SECONDS ?? 0);
-const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3000";
+const NAMES = ["Zizou","Kevin92","Malaury","Nadia","Poucave","Gérard","Momo","Clara","Babtou","Yasmina","Fraudinho","Turnstile","Sonia","Dédé","Amine","Fatou","Bébert","Wesh","Djamel","Enzo","Kylian","Ginette","Rocco","Naïma"];
 
-function saveBots(gameId: bigint, bots: Bot[]) {
-  if (!existsSync(STATE_DIR)) mkdirSync(STATE_DIR, { recursive: true });
-  writeFileSync(join(STATE_DIR, `bots-${gameId}.json`), JSON.stringify(bots, null, 2));
+type Bot = { key: Hex; address: Address; nick: string };
+
+async function readGame(addr: Address, gameId: bigint) {
+  const g = (await readContract(addr, "getGame", [gameId])) as any[];
+  return {
+    creator: g[0] as Address,
+    numWagons: Number(g[1]),
+    wagonCap: Number(g[2]),
+    numControllers: Number(g[3]),
+    numStations: Number(g[4]),
+    boardDuration: Number(g[5]),
+    startedAt: Number(g[6]),
+    started: g[7] as boolean,
+    settled: g[8] as boolean,
+    playerCount: Number(g[9]),
+    entryFee: g[10] as bigint,
+    pot: g[11] as bigint,
+    stationDuration: Number(g[12]),
+    gameEnd: Number(g[13]),
+  };
 }
-function loadBots(gameId: bigint): Bot[] | null {
-  const p = join(STATE_DIR, `bots-${gameId}.json`);
-  return existsSync(p) ? (JSON.parse(readFileSync(p, "utf8")) as Bot[]) : null;
+
+function spread(gameId: bigint, addr: Address, station: number, wagons: number) {
+  let h = 0;
+  const s = `${gameId}-${addr}-${station}`;
+  for (let i = 0; i < s.length; i++) h = (h * 131 + s.charCodeAt(i)) >>> 0;
+  return h % wagons;
 }
 
 async function main() {
   const gmKey = requireGmKey();
   const gm = gmAccount();
   const addr = process.env.CONTRACT_ADDRESS as Address;
-  if (!addr) throw new Error("Set CONTRACT_ADDRESS in .env (run `npm run deploy` first).");
-  const bal = await publicClient.getBalance({ address: gm.address });
-  console.log(`\n🚇 KEEPER — chain ${CHAIN_ID} @ ${RPC_URL}`);
-  console.log(`GM ${gm.address}  balance ${formatEther(bal)} MON  contract ${addr}`);
+  const gameId = BigInt(process.env.GAME_ID ?? "0");
+  if (!addr || !gameId) throw new Error("Set CONTRACT_ADDRESS and GAME_ID in env.");
+  console.log(`🚇 KEEPER V2 — chain ${CHAIN_ID} @ ${RPC_URL}`);
+  console.log(`GM ${gm.address} ${formatEther(await publicClient.getBalance({ address: gm.address }))} MON  game #${gameId}`);
 
-  // 1. Resolve game id
-  let gameId: bigint;
-  if (process.env.GAME_ID) {
-    gameId = BigInt(process.env.GAME_ID);
-  } else {
-    await writeWithRetry(gmKey, addr, "createGame", [STATIONS, COMMIT, REVEAL], { label: "createGame" });
-    gameId = (await readContract(addr, "gameCount", [])) as bigint;
-    console.log(`Created game ${gameId} (${STATIONS} stations, ${COMMIT}s/${REVEAL}s).`);
-  }
-
-  // 2. Bots (reload if we already registered them for this game)
   let g = await readGame(addr, gameId);
-  let bots = loadBots(gameId);
-  if (!bots) {
-    if (g.startedAt !== 0) {
-      console.log("Game already started; skipping bot registration.");
-      bots = [];
-    } else {
-      const slots = Math.max(0, N_BOTS - g.playerCount);
-      bots = makeBots(gameId, slots, SECRET, DENOM);
-      const nCtrl = bots.filter((b) => b.role === Role.CONTROLEUR).length;
-      console.log(`Adding ${bots.length} bots (${nCtrl} contrôleurs)...`);
-      await fundAndRegisterBots(gmKey, addr, gameId, bots, SECRET, DENOM, FUND);
-      saveBots(gameId, bots);
-    }
-  } else {
-    console.log(`Reloaded ${bots.length} bots from state.`);
+
+  // add bots (fund + pay-join) if not started yet
+  if (!existsSync(STATE_DIR)) mkdirSync(STATE_DIR, { recursive: true });
+  const botsPath = join(STATE_DIR, `bots-${gameId}.json`);
+  let bots: Bot[] = existsSync(botsPath) ? JSON.parse(readFileSync(botsPath, "utf8")) : [];
+  if (!g.started && bots.length === 0 && N_BOTS > 0) {
+    const cap = (await readContract(addr, "maxPlayers", [gameId])) as bigint;
+    const slots = Math.max(0, Math.min(N_BOTS, Number(cap) - g.playerCount));
+    bots = Array.from({ length: slots }, (_, i) => {
+      const key = generatePrivateKey();
+      return { key, address: privateKeyToAccount(key).address as Address, nick: NAMES[i % NAMES.length] + (i >= NAMES.length ? i : "") };
+    });
+    console.log(`funding + joining ${bots.length} bots (fee ${formatEther(g.entryFee)} MON each)...`);
+    await batchFromGM(gmKey, bots.map((b) => ({ to: b.address, value: g.entryFee + parseEther("0.01") })));
+    await mapLimit(bots, 5, (b) => writeWithRetry(b.key, addr, "join", [gameId, b.nick], { value: g.entryFee, label: `join ${b.nick}` }));
+    writeFileSync(botsPath, JSON.stringify(bots));
+    console.log(`bots in. Waiting for host to press Lancer...`);
   }
 
-  // 3. Join window — wait for START
-  console.log(`\n📱 Join at: ${BASE_URL}/play   |   Screen: ${BASE_URL}/screen`);
-  g = await readGame(addr, gameId);
-  if (g.startedAt === 0) {
-    if (AUTOSTART > 0) {
-      console.log(`Auto-starting in ${AUTOSTART}s (or when admin presses START)...`);
-      const deadline = Date.now() + AUTOSTART * 1000;
-      while (Date.now() < deadline) {
-        g = await readGame(addr, gameId);
-        if (g.startedAt !== 0) break;
-        await sleep(1000);
-      }
-      if (g.startedAt === 0) {
-        await writeWithRetry(gmKey, addr, "startGame", [gameId], { label: "startGame" });
-      }
-    } else {
-      console.log("Waiting for admin to press START...");
-      while (g.startedAt === 0) {
-        await sleep(1000);
-        g = await readGame(addr, gameId);
-      }
-    }
+  // wait for start
+  while (!g.started) {
+    await sleep(1500);
+    g = await readGame(addr, gameId);
   }
-  g = await readGame(addr, gameId);
-  console.log(`▶️  Game started with ${g.playerCount} passengers. Driving ${bots.length} bots.`);
+  const players = (await readContract(addr, "getPlayers", [gameId])) as Address[];
+  const roles = assignRoles(gameId, players, SECRET, g.numControllers);
+  const keyByAddr = new Map(bots.map((b) => [b.address.toLowerCase(), b.key] as const));
+  console.log(`▶️ started — ${players.length} joueurs, ${g.numControllers} contrôleurs. Driving ${bots.length} bots.`);
 
-  // 4. Station loop
+  // drive bots each station
   for (let s = 0; s < g.numStations; s++) {
-    if (await readContract(addr, "stationResolved", [gameId, s])) continue;
-    const t = await stationTimes(addr, gameId, s);
-    console.log(`\n--- Station ${s + 1}/${g.numStations} ---`);
-    if ((await chainNow()) < t.commitEnd) {
-      await waitUntilChain(t.commitStart, `commit st${s + 1}`);
-      const c = await botsCommit(addr, gameId, s, bots, SECRET);
-      console.log(`  bots committed: ${c}/${bots.length}`);
-    }
-    if ((await chainNow()) < t.revealEnd) {
-      await waitUntilChain(t.commitEnd, `reveal st${s + 1}`);
-      const r = await botsReveal(addr, gameId, s, bots, SECRET);
-      console.log(`  bots revealed: ${r}/${bots.length}`);
-    }
-    await waitUntilChain(t.revealEnd, `resolve st${s + 1}`);
-    await resolveStation(gmKey, addr, gameId, s);
-    const [, inspected, , , outcomes] = (await readContract(addr, "getStationResult", [gameId, s])) as any[];
-    const caught = (outcomes as number[]).filter((o) => o === 3).length;
-    console.log(`  🎯 resolved — cars [${(inspected as number[]).join(",")}], ${caught} pincé(s)`);
+    const [bStart] = (await readContract(addr, "stationWindow", [gameId, s])) as bigint[];
+    await waitUntilChain(Number(bStart), `board st${s + 1}`);
+    const prior = await fetchBoarding(addr, gameId, s, players);
+    const alive = s === 0 ? players.map(() => true) : simEliminations(gameId, g.numWagons, s, players, roles as number[], prior).alive;
+    const boarders = players.map((p, i) => ({ p, i })).filter(({ p, i }) => alive[i] && keyByAddr.has(p.toLowerCase()));
+    await mapLimit(boarders, 5, ({ p }) =>
+      writeWithRetry(keyByAddr.get(p.toLowerCase())!, addr, "board", [gameId, s, spread(gameId, p, s, g.numWagons)], { label: `board st${s}` })
+    );
+    console.log(`  station ${s + 1}: bots montés`);
   }
 
-  // 5. Finish
+  // settle
   await waitUntilChain(g.gameEnd, "gameEnd");
-  console.log(`\nFinishing game...`);
-  await finishGame(gmKey, addr, gameId, SECRET, DENOM);
-  await printResults(addr, gameId);
-  console.log(`\n✅ Game ${gameId} complete.`);
+  g = await readGame(addr, gameId);
+  if (!g.settled) {
+    const salts = players.map((p) => roleSaltFor(gameId, p, SECRET));
+    console.log("règlement du pot...");
+    await writeWithRetry(gmKey, addr, "settle", [gameId, roles, salts], { label: "settle" });
+  }
+  const survivors = (await readContract(addr, "getSurvivors", [gameId])) as Address[];
+  console.log(`✅ terminé — ${survivors.length} survivant(s) se partagent ${formatEther(g.pot)} MON`);
+}
+
+async function fetchBoarding(addr: Address, gameId: bigint, upto: number, players: Address[]) {
+  const out: { boarded: boolean; wagon: number }[][] = [];
+  for (let s = 0; s < upto; s++) {
+    const [, boarded, wagons] = (await readContract(addr, "getBoarding", [gameId, s])) as [Address[], boolean[], number[], number[]];
+    out[s] = players.map((_, i) => ({ boarded: boarded[i], wagon: Number(wagons[i]) }));
+  }
+  return out;
 }
 
 main().catch((e) => {
-  console.error("\n❌ KEEPER FAILED:", e?.shortMessage ?? e?.message ?? e);
+  console.error("❌ KEEPER FAILED:", e?.shortMessage ?? e?.message ?? e);
   process.exit(1);
 });
