@@ -1,174 +1,87 @@
-# 🚇 Fraude sur le RER B
+# 🚇 Fraude sur le RER B — édition survie
 
-**A fully on-chain social-deduction party game — built for Monad Blitz Paris.**
-The whole room boards the same RER B train from Robinson to Aéroport CDG. At every station each
-passenger secretly picks a **car** and either **PAYER** (buy a ticket, −2 pts) or **FRAUDER**
-(free). Hidden **CONTRÔLEURS** secretly inspect one car — fraudsters caught there pay a **20 pt
-fine**, split among the inspectors of that car. Roles stay hidden on-chain until the terminus.
+**A fully on-chain survival party game — built for Monad Blitz Paris.**
+Everyone pays a small MON stake to board the same RER B train. Each station you secretly pick a
+**wagon**. Hidden **contrôleurs** ride with you — everyone sharing a wagon with a contrôleur is
+**eliminated**. Survive to Aéroport CDG and the last passengers **split the whole pot**.
 
-> *« Payez votre ticket ou fraudez. Des contrôleurs se cachent parmi vous. Fraudeur contrôlé = 20 points d'amende. »*
+> *Cachez-vous dans le bon wagon. Les contrôleurs rôdent.*
 
-Points are **in-game only** (everyone starts at 100). No money, no gambling — just pride and shame.
+- 📱 **Zero-friction:** open the app → a burner wallet is created and auto-funded → pay the stake → you're in. No MetaMask, no faucet.
+- 🎭 **Two roles, nobody knows who:** **fraudeurs** hide, **contrôleurs** hunt. Roles are hidden on-chain until the very end.
+- 💰 **Real (testnet) MON pot:** every stake goes in; survivors split it all. Payout is computed and paid **by the contract itself** — trustless.
+- 🤖 **Bots** fill the train; a **solo mode** runs a whole game from the terminal.
 
-- 📱 **Zero-friction:** scan a QR → type a pseudo → playing. A burner wallet is generated on the
-  phone and auto-funded; there is no MetaMask, no network switch, no faucet.
-- ⏱️ **One tap per station:** choose a car + action; the reveal is sent automatically by the phone.
-- 🤖 **Bots** fill the train to 20 passengers so it works with few humans (and a solo demo mode).
-- 🖥️ A **big-screen** projector view animates the whole thing: gliding train, contrôleur
-  silhouettes, `AMENDE −20` rubber stamps, live leaderboard, awards + role unmasking.
+## Rules
+1. The host creates a game: number of **wagons**, **contrôleurs**, and **stations**.
+2. Players join (small MON stake). Up to **3 players per wagon** register; a wagon holds **5** at a time (full = locked). A wagon can be empty.
+3. On start, exactly *N* players are secretly made contrôleurs (the rest are fraudeurs). Contrôleurs see each other.
+4. Each station (≈20 s): everyone taps a wagon. Then the train departs and the wagons with a contrôleur light up — **everyone in them is eliminated**, their stake stays in the pot. A contrôleur who catches nobody **two stations in a row** is eliminated too.
+5. Eliminated players keep watching as ghosts. At CDG, **survivors split the pot** and all roles are revealed.
 
----
+Not boarding in time = you ride in a random wagon (don't miss the train).
 
 ## Why Monad
+The game only works if dozens of people act every ~20 s and see the result instantly — a burst of
+tx per station, every round. Monad's **sub-second blocks + high throughput** make that feel live.
+Cheap gas means we can auto-fund every player's burner and cover their txs. Measured on testnet:
+individual txs confirm in ~1 block; the only bottleneck was the **public RPC rate limit** on bursts
+from one IP (the keeper's bots), solved with a fallback RPC pool + bounded concurrency. See `NOTES.md`.
 
-The game only works if **dozens of people take an action every ~20 seconds and see the result
-instantly.** That's a burst of 20–60+ transactions per station (commits, reveals, resolution),
-repeated every round. Monad's **sub-second blocks and high throughput** make that burst clear well
-inside a 12 s commit window, so the round feels live rather than laggy. On a slower chain the
-"everyone plays at once" mechanic simply falls apart. Cheap gas also means auto-funding every
-player's burner and covering their txs costs almost nothing.
+## Hidden roles + trustless money
+- On start, the host stores a **commitment** per player: `roleCommit = keccak256(player, role, salt, gameId)`. Roles/salts are derived deterministically from a shared `MASTER_SECRET`, so the Vercel backend and the laptop keeper agree with **no database**.
+- Wagon choices are **public** (that's the visible fill) — but nothing reveals a role.
+- At `settle`, the host submits every `(role, salt)`; the contract verifies them against the commitments, **recomputes the entire elimination sequence from the on-chain boarding history**, decides the survivors and **pays the pot**. The game master cannot cheat the payout, and roles stay hidden until the end. Eliminated players' late boardings are ignored by the canonical recomputation (anti-cheat).
 
----
-
-## Hidden roles on a public chain (the interesting part)
-
-Roles must **not** be readable on-chain while the game is running, yet everything must be
-verifiable afterwards. We use a two-layer commit-reveal:
-
-**1. Role commitment (at registration).** The Game Master stores only
-```
-roleCommit[player] = keccak256(abi.encode(player, role, roleSalt, gameId))
-```
-The plaintext `role` + `roleSalt` are derived **deterministically** from a shared `MASTER_SECRET`:
-```
-role     = keccak256("RERB_ROLE",      gameId, player, MASTER_SECRET) % ROLE_DENOM == 0 ? CONTRÔLEUR : PASSAGER
-roleSalt = keccak256("RERB_ROLE_SALT", gameId, player, MASTER_SECRET)
-```
-Both the Vercel backend (`/api/join`) and the laptop keeper know `MASTER_SECRET`, so they can
-**assign a role at join time and reconstruct every role+salt at the end with zero shared database.**
-
-**2. Per-station choice commitment.** Every player — passenger or contrôleur — commits the same
-shape, so commits are indistinguishable:
-```
-h = keccak256(abi.encode(car, action, salt, player, stationIndex))
-```
-Passengers use `action ∈ {PAY, FRAUD}`; contrôleurs use `action = INSPECT` with `car` = the
-inspected car. On reveal, a contrôleur additionally supplies `roleSalt`, and the contract checks it
-against `roleCommit` — **a passenger literally cannot fake an inspection.**
-
-At `finishGame`, the GM submits every `(role, roleSalt)`; the contract verifies each against
-`roleCommit` and publishes the roles, so the whole game is provably fair.
-
-**Known limitation (future work):** after a contrôleur's first `reveal`, a motivated person decoding
-transaction calldata could learn that address is a contrôleur. The UI never shows roles before the
-end, but the calldata is public. A ZK role proof (prove "I am a contrôleur" without revealing which
-commitment) would close this. Similarly, a contrôleur who fails to auto-reveal is treated as a
-fraudster — the phone auto-reveals to avoid this.
-
----
+Known limitation: the live per-station "who got caught" reveal is computed off-chain by the server (it knows the secret) to drive the animation; the on-chain `settle` is the source of truth for money.
 
 ## Architecture
-
 ```mermaid
 flowchart TD
-  subgraph Phones["📱 Players (phones)"]
-    P["/play — burner wallet<br/>commit + auto-reveal"]
-  end
+  P["📱 /play — burner wallet<br/>join (pay) + tap a wagon"]
   subgraph Vercel["▲ Vercel (Next.js)"]
-    JOIN["/api/join<br/>fund + assign role + registerPlayer"]
-    STATE["/api/state<br/>cached read fan-in"]
-    ADMIN["/api/admin<br/>create / start / resolve / finish"]
-    SCREEN["/screen — projector UI"]
-    ADMINUI["/admin — control panel"]
+    CREATE["/api/create"]; FUND["/api/fund"]; START["/api/start"]; SETTLE["/api/settle"]
+    MYROLE["/api/myrole (signed)"]; STATE["/api/state (cached, live elim)"]
+    SCREEN["/screen — projector"]
   end
-  subgraph Laptop["💻 Laptop"]
-    KEEPER["keeper.ts<br/>drives bots + resolves stations<br/>+ finishGame"]
-  end
-  subgraph Monad["⛓️ Monad Testnet"]
-    C["FraudeRERB.sol"]
-  end
-
-  P -- "signed join" --> JOIN --> C
-  P -- "commit / reveal" --> C
-  KEEPER -- "bots commit/reveal, resolveStation, finishGame" --> C
-  ADMIN --> C
+  KEEPER["💻 keeper.ts — bots + auto-settle"]
+  C["⛓️ RERBSurvival.sol (Monad Testnet)"]
+  P -- "join / board (client tx)" --> C
+  P --> CREATE & FUND & START & SETTLE & MYROLE
+  CREATE & START & SETTLE & KEEPER --> C
   SCREEN -- "poll ~400ms" --> STATE --> C
-  P -- "poll" --> STATE
-  ADMINUI --> ADMIN
-  JOIN & KEEPER -. "share MASTER_SECRET<br/>(deterministic roles)" .-> C
+  START & SETTLE & KEEPER -. "MASTER_SECRET (deterministic roles)" .-> C
 ```
 
-Phases per station are a **deterministic schedule** fixed at `startGame`: `commit (12s) → reveal
-(5s) → resolve/animate (3s)`, so every client computes the same countdowns from `block.timestamp`.
-
-- **`contracts/`** — Foundry, `FraudeRERB.sol` (Solidity 0.8.28). 14 tests, `resolveStation` with
-  64 players ≈ 222k gas.
-- **`keeper/`** — TypeScript + viem. `simulate.ts` (full 20-bot game from the terminal),
-  `keeper.ts` (live game driver), `deploy.ts`, `probe.ts` (M0 latency check).
-- **`app/`** — Next.js App Router + Tailwind + Framer Motion. `/play`, `/screen`, `/admin`, and the
-  `/api/*` routes.
-- **`shared/`** — the contract ABI, imported by both keeper and app.
-
----
-
-## Run it
-
-### 0. Prereqs
-- Node 20+, Foundry, a **test** wallet funded with MON from **blitz.devnads.com**.
-- `cp .env.example .env` and fill `PRIVATE_KEY`, `MASTER_SECRET`, `ADMIN_SECRET`.
-
-### 1. Contract
-```bash
-cd contracts && forge test            # 14 tests green
-cd ../keeper && npm i && npm run deploy   # writes deployments/monad-testnet.json
-# put the address in .env: CONTRACT_ADDRESS + NEXT_PUBLIC_CONTRACT_ADDRESS
-```
-
-### 2. Prove the core (no UI needed)
-```bash
-cd keeper && npm run simulate -- --n 20 --stations 4      # full game in the terminal
-# or against a local chain:  anvil --block-time 1 &  then set MONAD_RPC_URL=http://127.0.0.1:8545
-```
-
-### 3. App
-```bash
-cd app && npm i && npm run dev     # http://localhost:3000  (/screen, /play, /admin?secret=...)
-```
-
-### 4. Live demo flow
-1. Open `/screen` on the projector, `/admin?secret=$ADMIN_SECRET` on your laptop.
-2. In `/admin`, **Create** a game (preset *Démo 4·12·5*).
-3. Start the keeper to add bots and drive them:
-   `cd keeper && npm run keeper` (set `GAME_ID`, `N_BOTS=20`; `AUTOSTART_SECONDS=0` waits for START).
-4. The room scans the QR on `/screen` and joins.
-5. Press **DÉMARRER** in `/admin`. Enjoy. At CDG: podium, awards, roles unmasked.
-
-**Solo / rehearsal mode:** skip step 4 — just the keeper's bots. A 4-station game runs in ~80 s.
-
-### M0 risk check
-`cd keeper && npm run probe -- --n 20` deploys `Ping` and blasts 20 txs; see `NOTES.md` for the
-verdict and the fallback ladder (more sender keys → longer commit window → fewer bots).
-
----
-
-## Deploy to Vercel
-Point the project **Root Directory** to `app/`, add the env vars from `.env.example`
-(`PRIVATE_KEY`, `MASTER_SECRET`, `ADMIN_SECRET`, `CONTRACT_ADDRESS`, `NEXT_PUBLIC_*`, a good RPC —
-an Alchemy Monad key is recommended so 30 phones don't hit the public RPC rate limit), and deploy.
-The keeper always runs on your **laptop** (it holds bot keys and resolves stations).
-
----
+- **`contracts/`** — Foundry, `RERBSurvival.sol` (0.8.28). 11 tests; settle @ 24 players/3 stations ≈ 6.4M gas. (`FraudeRERB.sol` is the earlier points-based prototype, kept for reference.)
+- **`keeper/`** — TS + viem: `simulate.ts` (full game from the terminal), `keeper.ts` (bots + auto-settle), `deploy.ts`, `probe.ts`.
+- **`app/`** — Next.js App Router + Tailwind + Framer Motion. Hand-drawn riso/screenprint DA (SVG passengers, contrôleur, wagons), chiptune music + French announcements.
 
 ## Deployed & live
-- **App:** https://monad-blitz-paris.vercel.app  (`/screen`, `/play`, `/admin?secret=…`)
-- **Contract (Monad Testnet):** [`0x49b178282ad9e83cc117e0412a5f0ad062f2198a`](https://testnet.monadexplorer.com/address/0x49b178282ad9e83cc117e0412a5f0ad062f2198a)
-- Full details in [`deployments/monad-testnet.json`](deployments/monad-testnet.json).
+- **App:** https://monad-blitz-paris.vercel.app  (`/play`, `/screen`)
+- **Contract (Monad Testnet):** [`0x450F34a1a3e6Cd3c394F621708F03Ba40E7026ed`](https://testnet.monadexplorer.com/address/0x450F34a1a3e6Cd3c394F621708F03Ba40E7026ed)
+- **Game master / filler:** `0x2a9d3d608580df871E86eE1C161f1b5191c1c7Aa` (funds burners + pays gas)
 
-Verified live on Monad Testnet — a full 20-bot × 3-station game ran end-to-end (commit / reveal /
-resolve / finish, correct fines, splits, non-revealer handling and role reveal), plus a mixed
-human+bot game through the deployed app. See `NOTES.md` for the M0 RPC finding and fix.
+## Run it
+```bash
+# contract
+cd contracts && forge test
+cd ../keeper && npm i && npm run deploy        # writes deployments/monad-testnet.json
 
-## Credits & disclaimer
-Parody project. **No official RATP / SNCF / Île-de-France Mobilités logo, font (Parisine) or jingle
-is used** — all art, the 3-note chime and the announcements are original. Station names are real;
-the branding is ours.
+# full game in the terminal (no UI)
+npm run simulate -- --wagons 4 --stations 4 --n 12
+
+# app
+cd ../app && npm i && npm run dev               # /play, /screen
+```
+
+### Live demo
+1. Host opens `/play`, taps **Créer une partie** (wagons / contrôleurs / stations) → auto-joins and gets an **Ouvrir le grand écran** link.
+2. Open that `/screen?g=<id>` on the projector — its QR points players straight to that game.
+3. Fill with bots from the laptop: `cd keeper && GAME_ID=<id> N_BOTS=12 npm run keeper` (it also auto-settles at the end).
+4. Room scans the QR, joins. Host taps **LANCER**. Tap a wagon each station. Survivors split the pot at CDG.
+
+Solo/rehearsal: just the keeper's bots.
+
+## Credits
+Parody project — all art, the chiptune and the announcements are original; no official RATP/SNCF/IDFM asset is used.
