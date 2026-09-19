@@ -24,9 +24,9 @@ export async function POST(req: NextRequest) {
     for (const log of rcpt.logs) {
       if (log.address.toLowerCase() !== CONTRACT.toLowerCase()) continue;
       try {
-        const ev = decodeEventLog({ abi: FraudeRERB_ABI, data: log.data, topics: log.topics });
+        const ev = decodeEventLog({ abi: FraudeRERB_ABI, data: log.data, topics: log.topics }) as any;
         if (ev.eventName === "GameCreated") {
-          gid = (ev.args as any).gameId.toString();
+          gid = ev.args.gameId.toString();
           break;
         }
       } catch {}
