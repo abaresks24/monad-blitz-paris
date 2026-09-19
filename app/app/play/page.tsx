@@ -17,7 +17,7 @@ async function ensureFunded(address: `0x${string}`, minWei: bigint) {
     await new Promise((r) => setTimeout(r, 500));
   }
 }
-import { Role } from "@/lib/game";
+import { Role, stationLabels } from "@/lib/game";
 import { useGame, useCountdown, type Snap } from "@/lib/useGame";
 import { sendCreate, sendJoin, sendStart, sendBoard } from "@/lib/tx";
 import { Passenger, Controleur, TicketMark } from "@/components/art";
@@ -319,9 +319,14 @@ function PlayView({ state, meIndex, myWagon, onBoard, iAmController }: { state: 
   if (cb) cb.wagons.forEach((w) => { if (w >= 0) counts[w]++; });
   const reveal = state.phase === "reveal";
 
+  const labels = stationLabels(state.game.numStations);
+  const stName = labels[Math.min(state.station, labels.length - 1)] ?? "";
+
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex-1 flex flex-col">
       <div className="text-center mb-2">
+        <div className="riso text-yellow text-2xl leading-tight">PROCHAIN ARRÊT</div>
+        <div className="riso text-cream text-3xl mb-1 leading-tight">{stName.toUpperCase()}</div>
         <div className={`riso text-5xl ${secs <= 3 ? "text-vermilion" : "text-cream"}`}>
           {String(secs).padStart(2, "0")}s
         </div>
