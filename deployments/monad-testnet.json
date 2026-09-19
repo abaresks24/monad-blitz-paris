@@ -1,14 +1,9 @@
 {
   "chainId": 10143,
-  "rpc": "https://testnet-rpc.monad.xyz",
-  "rpcPool": [
-    "https://testnet-rpc.monad.xyz",
-    "https://10143.rpc.thirdweb.com",
-    "https://rpc.ankr.com/monad_testnet"
-  ],
-  "contract": "0x49b178282ad9e83cc117e0412a5f0ad062f2198a",
+  "contract": "0x450F34a1a3e6Cd3c394F621708F03Ba40E7026ed",
+  "contractName": "RERBSurvival",
   "gameMaster": "0x2a9d3d608580df871E86eE1C161f1b5191c1c7Aa",
-  "explorer": "https://testnet.monadexplorer.com/address/0x49b178282ad9e83cc117e0412a5f0ad062f2198a",
-  "app": "https://monad-blitz-paris.vercel.app",
-  "verified": "Full 20-bot x 3-station game ran live on Monad testnet; app + APIs live on Vercel."
+  "rpcPool": ["https://testnet-rpc.monad.xyz","https://10143.rpc.thirdweb.com","https://rpc.ankr.com/monad_testnet"],
+  "explorer": "https://testnet.monadexplorer.com/address/0x450F34a1a3e6Cd3c394F621708F03Ba40E7026ed",
+  "app": "https://monad-blitz-paris.vercel.app"
 }

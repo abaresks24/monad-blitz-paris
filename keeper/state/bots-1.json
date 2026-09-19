@@ -1,0 +1,50 @@
+[
+  {
+    "key": "0xa9c2d063067f9e380ba19a75e794dca9ffbdb901bf8120181bd3acd944cbe9ae",
+    "address": "0x09F04bF4b9A58eBfEcf7341F5f36c408098DA573",
+    "nickname": "Ticket'Pas",
+    "role": 1
+  },
+  {
+    "key": "0x4eec71e2a2ec30f10569bfc557477f7e9863bcf53cbbbe8a3eab293b12395fa7",
+    "address": "0x201d6CD55d9C37e706B2f85d89619893F1B1b442",
+    "nickname": "Zizou",
+    "role": 2
+  },
+  {
+    "key": "0x4eb48ccb9d0ccc9744bd1c602dfd85a7531efd34fabec666cf31dc237642a58c",
+    "address": "0x2f3E842cad825e3bf1eaf3386195B25baC90221D",
+    "nickname": "Kevin92",
+    "role": 1
+  },
+  {
+    "key": "0x24d86b2b420c5377191c540f0e1c6bb4a7cc7f8c85bdaeb04442154a0eaeb01b",
+    "address": "0x30958B39e680DFB8b523129aE6D194FBD9C9B20D",
+    "nickname": "Malaury",
+    "role": 1
+  },
+  {
+    "key": "0x1dab035b2e3b0dcb2a4ef7c9a64434dbf5103a8d69ebc23e46ceaf3a504b451b",
+    "address": "0x6b7fAdF734937A3193B594aD19D4af9a7ABE4db2",
+    "nickname": "Jean-Mich",
+    "role": 2
+  },
+  {
+    "key": "0x6b54b78a3b48405303cf6a22ef051902c610bf097df9aebb98fe59626d006429",
+    "address": "0x6CbDf23333CE344862B08F480a158B27A0feDf82",
+    "nickname": "BadgeUse",
+    "role": 1
+  },
+  {
+    "key": "0x59902bfa55956b5920f5a3992823af3ae12736b685705f391a2a48e903cc7827",
+    "address": "0xB6042c58BD17A1123c97D4825A85C20C19E82Ceb",
+    "nickname": "Poucave",
+    "role": 1
+  },
+  {
+    "key": "0x2b4a4294e1f0d8f1f16894bf5cbe2ffd2ba4be75564c82fc766518e43d36fa96",
+    "address": "0xdB5323e61C335E8DD7fE002D56Dd30a559d01af0",
+    "nickname": "Rémi",
+    "role": 1
+  }
+]
