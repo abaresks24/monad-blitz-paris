@@ -15,7 +15,7 @@ function urlGameId(): string | number {
 }
 
 export default function Screen() {
-  const { state, connected } = useGame(urlGameId(), 400);
+  const { state, connected, nowSec } = useGame(urlGameId(), 400);
   const [on, setOn] = useState(false);
   const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
 
@@ -36,7 +36,7 @@ export default function Screen() {
       <button onClick={() => { const n = !on; setOn(n); setSfxEnabled(n); if (n) startMusic(); else stopMusic(); }} className="absolute top-4 right-4 z-50 btn bg-cream text-ink px-4 py-2 rounded-lg text-sm">
         {on ? "SON : ON" : "ACTIVER LE SON"}
       </button>
-      {state.game.started === false ? <Lobby state={state} baseUrl={baseUrl} /> : state.phase === "ended" ? <End state={state} /> : <Running state={state} on={on} />}
+      {state.game.started === false ? <Lobby state={state} baseUrl={baseUrl} /> : state.phase === "ended" ? <End state={state} /> : <Running state={state} on={on} nowSec={nowSec} />}
     </Shell>
   );
 }
@@ -79,9 +79,9 @@ function Lobby({ state, baseUrl }: { state: Snap; baseUrl: string }) {
 }
 
 /* -------------------- RUNNING -------------------- */
-function Running({ state, on }: { state: Snap; on: boolean }) {
+function Running({ state, on, nowSec }: { state: Snap; on: boolean; nowSec: () => number }) {
   const labels = stationLabels(state.game.numStations);
-  const remaining = useCountdown(state.phaseEndsAt, () => state.now);
+  const remaining = useCountdown(state.phaseEndsAt, nowSec);
   const secs = Math.max(0, Math.ceil(remaining));
   const tickRef = useRef(-1);
   useEffect(() => { if (secs !== tickRef.current) { tickRef.current = secs; if (on && state.phase === "board" && secs <= 3 && secs > 0) playTick(secs === 1); } }, [secs, state.phase, on]);

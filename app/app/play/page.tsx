@@ -30,7 +30,7 @@ function urlGameId(): string | number {
 }
 
 export default function Play() {
-  const { state, connected } = useGame(urlGameId(), 600);
+  const { state, connected, nowSec } = useGame(urlGameId(), 600);
   const [burner, setBurner] = useState<{ pk: Hex; address: `0x${string}` } | null>(null);
   useEffect(() => setBurner(getBurner()), []);
 
@@ -42,7 +42,7 @@ export default function Play() {
   const wantNew = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("new") === "1";
 
   if (wantNew || !amIn) return <Entry burner={burner} state={state} />;
-  return <Game burner={burner} state={state} meIndex={meIndex} />;
+  return <Game burner={burner} state={state} meIndex={meIndex} nowSec={nowSec} />;
 }
 
 function Splash({ children }: { children: React.ReactNode }) {
@@ -172,7 +172,7 @@ function Stepper({ label, v, set, min, max }: { label: string; v: number; set: (
 }
 
 /* ------------------------------------------------------------------ GAME */
-function Game({ burner, state, meIndex }: { burner: { pk: Hex; address: `0x${string}` }; state: Snap; meIndex: number }) {
+function Game({ burner, state, meIndex, nowSec }: { burner: { pk: Hex; address: `0x${string}` }; state: Snap; meIndex: number; nowSec: () => number }) {
   const g = state.game;
   const gid = String(state.gameId);
   const isCreator = burner.address.toLowerCase() === g.creator.toLowerCase();
@@ -258,7 +258,7 @@ function Game({ burner, state, meIndex }: { burner: { pk: Hex; address: `0x${str
           {g.started === false && <Lobby key="lobby" state={state} isCreator={isCreator} onStart={onStart} busy={busy} err={err} />}
           {g.started && state.phase !== "ended" && (
             alive
-              ? <PlayView key="play" state={state} meIndex={meIndex} myWagon={myWagon} onBoard={board} iAmController={iAmController} />
+              ? <PlayView key="play" state={state} meIndex={meIndex} myWagon={myWagon} onBoard={board} iAmController={iAmController} nowSec={nowSec} />
               : <Spectator key="spec" state={state} />
           )}
           {state.phase === "ended" && <EndView key="end" state={state} meIndex={meIndex} isCreator={isCreator} onSettle={onSettle} busy={busy} />}
@@ -307,8 +307,8 @@ function Lobby({ state, isCreator, onStart, busy, err }: { state: Snap; isCreato
   );
 }
 
-function PlayView({ state, meIndex, myWagon, onBoard, iAmController }: { state: Snap; meIndex: number; myWagon: number | null; onBoard: (w: number) => void; iAmController: boolean }) {
-  const remaining = useCountdown(state.phaseEndsAt, () => state.now);
+function PlayView({ state, meIndex, myWagon, onBoard, iAmController, nowSec }: { state: Snap; meIndex: number; myWagon: number | null; onBoard: (w: number) => void; iAmController: boolean; nowSec: () => number }) {
+  const remaining = useCountdown(state.phaseEndsAt, nowSec);
   const secs = Math.ceil(remaining);
   const tickRef = useRef(-1);
   useEffect(() => { if (secs !== tickRef.current) { tickRef.current = secs; if (state.phase === "board" && secs <= 3 && secs > 0) playTick(secs === 1); } }, [secs, state.phase]);
@@ -339,22 +339,24 @@ function PlayView({ state, meIndex, myWagon, onBoard, iAmController }: { state: 
         key={reveal ? "rev" : "brd"}
         animate={reveal ? { x: [0, -22, 12, -6, 0] } : { x: 0 }}
         transition={{ duration: 0.6 }}
-        className="grid grid-cols-2 gap-2 flex-1 content-start"
+        className="grid gap-2 flex-1 overflow-y-auto content-start pb-1"
+        style={{ gridTemplateColumns: `repeat(${state.game.numWagons <= 4 ? 2 : state.game.numWagons <= 9 ? 3 : 4}, minmax(0,1fr))` }}
       >
         {Array.from({ length: state.game.numWagons }).map((_, w) => {
           const full = counts[w] >= state.game.wagonCap;
           const mine = myWagon === w;
+          const big = state.game.numWagons <= 6;
           return (
             <button
               key={w}
               onClick={() => onBoard(w)}
               disabled={state.phase !== "board" || (full && !mine)}
-              className={`relative rounded-2xl p-3 min-h-24 flex flex-col items-center justify-center ${mine ? "bg-blue" : "bg-ink2"}`}
+              className={`relative rounded-2xl flex flex-col items-center justify-center active:scale-95 transition ${big ? "min-h-24 p-3" : "min-h-16 p-2"} ${mine ? "bg-blue" : "bg-ink2"}`}
               style={{ border: `3px solid ${mine ? "#F3E9D2" : full ? "#FF4E3A" : "#F3E9D2"}` }}
             >
-              <div className="riso text-cream text-2xl">VOITURE {w + 1}</div>
-              {mine && <div className="riso text-cream text-sm mt-1">TU ES ICI</div>}
-              {full && !mine && <span className="absolute inset-0 flex items-center justify-center riso text-vermilion text-lg -rotate-6">COMPLET</span>}
+              <div className={`riso text-cream ${big ? "text-2xl" : "text-lg"} leading-none`}>V{w + 1}</div>
+              {mine && <div className="riso text-cream text-xs mt-1">TU ES ICI</div>}
+              {full && !mine && <span className="absolute inset-0 flex items-center justify-center riso text-vermilion text-sm -rotate-6">COMPLET</span>}
             </button>
           );
         })}
