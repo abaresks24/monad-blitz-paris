@@ -1,0 +1,117 @@
+import "server-only";
+import { createPublicClient, createWalletClient, http, defineChain, type Hex, type Address } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+import abi from "./abi.json";
+
+export const FraudeRERB_ABI = abi as any[];
+
+const RPC_URL = process.env.MONAD_RPC_URL ?? process.env.NEXT_PUBLIC_MONAD_RPC_URL ?? "https://testnet-rpc.monad.xyz";
+const CHAIN_ID = Number(process.env.MONAD_CHAIN_ID ?? process.env.NEXT_PUBLIC_CHAIN_ID ?? 10143);
+export const CONTRACT = (process.env.CONTRACT_ADDRESS ?? process.env.NEXT_PUBLIC_CONTRACT_ADDRESS ?? "") as Address;
+export const MASTER_SECRET = process.env.MASTER_SECRET ?? "blitz-demo-secret";
+export const ROLE_DENOM = Number(process.env.ROLE_DENOM ?? 8);
+export const ADMIN_SECRET = process.env.ADMIN_SECRET ?? "change-me";
+export const BURNER_FUND_MON = process.env.BURNER_FUND_MON ?? "0.03";
+
+export const serverChain = defineChain({
+  id: CHAIN_ID,
+  name: "Monad Testnet",
+  nativeCurrency: { name: "Monad", symbol: "MON", decimals: 18 },
+  rpcUrls: { default: { http: [RPC_URL] }, public: { http: [RPC_URL] } },
+  testnet: true,
+});
+
+export const serverPublic = createPublicClient({ chain: serverChain, transport: http(RPC_URL) });
+
+export function gmKey(): Hex {
+  const pk = process.env.PRIVATE_KEY;
+  if (!pk || !pk.startsWith("0x") || pk.length !== 66) {
+    throw new Error("Server missing valid PRIVATE_KEY (Game Master key).");
+  }
+  return pk as Hex;
+}
+
+export function gmWallet() {
+  return createWalletClient({ account: privateKeyToAccount(gmKey()), chain: serverChain, transport: http(RPC_URL) });
+}
+
+export function gmAddress(): Address {
+  return privateKeyToAccount(gmKey()).address;
+}
+
+export function cfg() {
+  return { address: CONTRACT, abi: FraudeRERB_ABI } as const;
+}
+
+/** JSON-safe (bigint → number/string) */
+export function jsonSafe<T>(v: T): T {
+  return JSON.parse(JSON.stringify(v, (_k, val) => (typeof val === "bigint" ? Number(val) : val)));
+}
+
+// ---- Serialized GM sender with in-process nonce management + retry ----
+// The join rush fires many /api/join calls at once; concurrent GM txs would collide on
+// nonce. We serialize GM txs in-process and track the nonce locally, refetching on error.
+let gmChain: Promise<any> = Promise.resolve();
+let gmNonce: number | null = null;
+
+function withGmLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = gmChain.then(fn, fn);
+  gmChain = run.then(
+    () => {},
+    () => {}
+  );
+  return run;
+}
+
+async function nextNonce(): Promise<number> {
+  if (gmNonce === null) {
+    gmNonce = await serverPublic.getTransactionCount({ address: gmAddress(), blockTag: "pending" });
+  }
+  return gmNonce;
+}
+
+/** Send a GM contract write with serialized nonce + one retry on nonce/RPC error. */
+export async function gmWrite(functionName: string, args: any[], value?: bigint): Promise<`0x${string}`> {
+  return withGmLock(async () => {
+    const wallet = gmWallet();
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const nonce = await nextNonce();
+        const hash = await wallet.writeContract({
+          ...cfg(),
+          functionName,
+          args,
+          value,
+          nonce,
+          account: wallet.account!,
+          chain: serverChain,
+        } as any);
+        gmNonce = nonce + 1;
+        return hash;
+      } catch (e: any) {
+        gmNonce = null; // refetch on next attempt
+        if (attempt === 1) throw e;
+      }
+    }
+    throw new Error("unreachable");
+  });
+}
+
+/** Send native MON from GM (serialized nonce). */
+export async function gmSendValue(to: Address, value: bigint): Promise<`0x${string}`> {
+  return withGmLock(async () => {
+    const wallet = gmWallet();
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const nonce = await nextNonce();
+        const hash = await wallet.sendTransaction({ to, value, nonce, account: wallet.account!, chain: serverChain });
+        gmNonce = nonce + 1;
+        return hash;
+      } catch (e: any) {
+        gmNonce = null;
+        if (attempt === 1) throw e;
+      }
+    }
+    throw new Error("unreachable");
+  });
+}
