@@ -39,8 +39,9 @@ export default function Play() {
   const gid = String(state.gameId);
   const meIndex = state.roster.findIndex((r) => r.addr.toLowerCase() === burner.address.toLowerCase());
   const amIn = meIndex >= 0 && hasJoined(gid);
+  const wantNew = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("new") === "1";
 
-  if (!amIn) return <Entry burner={burner} state={state} />;
+  if (wantNew || !amIn) return <Entry burner={burner} state={state} />;
   return <Game burner={burner} state={state} meIndex={meIndex} />;
 }
 
@@ -313,43 +314,47 @@ function PlayView({ state, meIndex, myWagon, onBoard, iAmController }: { state: 
   useEffect(() => { if (secs !== tickRef.current) { tickRef.current = secs; if (state.phase === "board" && secs <= 3 && secs > 0) playTick(secs === 1); } }, [secs, state.phase]);
 
   const cb = state.currentBoarding;
-  const perWagon: number[][] = Array.from({ length: state.game.numWagons }, () => []);
-  if (cb) state.roster.forEach((_, i) => { const w = cb.wagons[i]; if (w >= 0) perWagon[w].push(i); });
+  // full detection only (counts are HIDDEN from players for suspense)
+  const counts: number[] = Array.from({ length: state.game.numWagons }, () => 0);
+  if (cb) cb.wagons.forEach((w) => { if (w >= 0) counts[w]++; });
+  const reveal = state.phase === "reveal";
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex-1 flex flex-col">
       <div className="text-center mb-2">
-        <div className={`riso text-5xl ${secs <= 3 && state.phase === "board" ? "text-vermilion" : "text-cream"}`}>
-          {state.phase === "board" ? `${String(secs).padStart(2, "0")}s` : "CONTRÔLE…"}
+        <div className={`riso text-5xl ${secs <= 3 ? "text-vermilion" : "text-cream"}`}>
+          {String(secs).padStart(2, "0")}s
         </div>
         <div className="text-cream/70 text-sm">
-          {state.phase === "board" ? (iAmController ? "Choisis le wagon à inspecter" : "Cache-toi dans un wagon !") : "Les portes s'ouvrent…"}
+          {reveal ? "Contrôle en cours…" : iAmController ? "Choisis le wagon à inspecter" : "Cache-toi dans un wagon !"}
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-2 flex-1 content-start">
+      {/* quick "train departs" lurch when the doors close (board → reveal) */}
+      <motion.div
+        key={reveal ? "rev" : "brd"}
+        animate={reveal ? { x: [0, -22, 12, -6, 0] } : { x: 0 }}
+        transition={{ duration: 0.6 }}
+        className="grid grid-cols-2 gap-2 flex-1 content-start"
+      >
         {Array.from({ length: state.game.numWagons }).map((_, w) => {
-          const occ = perWagon[w];
-          const full = occ.length >= state.game.wagonCap;
+          const full = counts[w] >= state.game.wagonCap;
           const mine = myWagon === w;
           return (
             <button
               key={w}
               onClick={() => onBoard(w)}
               disabled={state.phase !== "board" || (full && !mine)}
-              className={`relative rounded-2xl p-2 min-h-28 flex flex-col ${mine ? "bg-blue" : "bg-ink2"}`}
+              className={`relative rounded-2xl p-3 min-h-24 flex flex-col items-center justify-center ${mine ? "bg-blue" : "bg-ink2"}`}
               style={{ border: `3px solid ${mine ? "#F3E9D2" : full ? "#FF4E3A" : "#F3E9D2"}` }}
             >
-              <div className="riso text-cream text-sm">VOITURE {w + 1} <span className="text-cream/60">{occ.length}/{state.game.wagonCap}</span></div>
-              <div className="flex flex-wrap gap-0.5 items-end justify-center flex-1 overflow-hidden">
-                {occ.slice(0, 6).map((i) => <Passenger key={i} seed={state.roster[i].nick} size={30} />)}
-              </div>
+              <div className="riso text-cream text-2xl">VOITURE {w + 1}</div>
+              {mine && <div className="riso text-cream text-sm mt-1">TU ES ICI</div>}
               {full && !mine && <span className="absolute inset-0 flex items-center justify-center riso text-vermilion text-lg -rotate-6">COMPLET</span>}
-              {mine && <span className="absolute top-1 right-2 riso text-cream text-xs">TOI ✓</span>}
             </button>
           );
         })}
-      </div>
-      <div className="text-center text-cream/60 text-xs mt-2">Station {state.station + 1}/{state.game.numStations} • {state.survivors} survivants</div>
+      </motion.div>
+      <div className="text-center text-cream/60 text-xs mt-2">Station {state.station + 1}/{state.game.numStations} • {state.survivors}/{state.game.playerCount} en vie</div>
     </motion.div>
   );
 }
@@ -389,7 +394,8 @@ function EndView({ state, meIndex, isCreator, onSettle, busy }: { state: Snap; m
         </button>
       )}
       {!settled && !isCreator && <div className="text-cream/60">En attente du partage du pot…</div>}
-      {settled && <div className="text-cream/70">{state.survivorAddrs?.length} survivant(s) se partagent {Number(state.potMon).toFixed(3)} MON</div>}
+      {settled && <div className="text-cream/70">{state.survivorAddrs?.length}/{state.game.playerCount} survivant(s) se partagent {Number(state.potMon).toFixed(3)} MON</div>}
+      <a href="/play?new=1" className="btn bg-blue text-cream text-xl px-8 py-4 rounded-xl mt-4">NOUVELLE PARTIE</a>
     </motion.div>
   );
 }

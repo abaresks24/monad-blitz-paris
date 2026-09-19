@@ -90,12 +90,10 @@ function Running({ state, on }: { state: Snap; on: boolean }) {
   const lr = state.lastReveal;
   const nWag = state.game.numWagons;
 
-  // occupants per wagon
+  // occupants per wagon — revealed ONLY at the control moment (hidden during boarding for suspense)
   const perWagon: number[][] = Array.from({ length: nWag }, () => []);
   if (reveal && lr) {
     state.roster.forEach((_, i) => { const w = lr.wagonOf[i]; if (w >= 0) perWagon[w].push(i); });
-  } else if (state.currentBoarding) {
-    state.roster.forEach((_, i) => { const w = state.currentBoarding!.wagons[i]; if (w >= 0) perWagon[w].push(i); });
   }
   const caught = new Set(reveal && lr ? [...lr.caught, ...lr.idleOut] : []);
   const inspected = new Set(reveal && lr ? lr.controllerWagons : []);
@@ -108,19 +106,19 @@ function Running({ state, on }: { state: Snap; on: boolean }) {
       {/* quay board */}
       <div className="bg-ink2 border-y-4 border-cream/30 px-8 py-3 flex items-center justify-between">
         <div className="riso text-yellow text-4xl">PROCHAIN ARRÊT — {(labels[Math.min(state.station, labels.length - 1)] ?? "").toUpperCase()}</div>
-        <div className={`riso text-4xl ${secs <= 3 && !reveal ? "text-vermilion" : "text-cream"}`}>{reveal ? "CONTRÔLE" : `EMBARQUEMENT ${String(secs).padStart(2, "0")}s`}</div>
+        <div className={`riso text-4xl ${secs <= 3 ? "text-vermilion" : "text-cream"}`}>{reveal ? "CONTRÔLE" : "EMBARQUEMENT"} {String(secs).padStart(2, "0")}s</div>
       </div>
       <div className="overflow-hidden bg-ink py-1"><div className="whitespace-nowrap riso text-cream/70 text-lg animate-marquee inline-block">{ticker}   ✦   {ticker}</div></div>
 
       {/* pot + survivors */}
       <div className="flex items-center justify-center gap-10 py-3">
         <Counter label="POT" value={`${Number(state.potMon).toFixed(3)} MON`} color="text-vermilion" />
-        <Counter label="SURVIVANTS" value={`${state.survivors}`} color="text-green" />
+        <Counter label="EN VIE" value={`${state.survivors}/${state.game.playerCount}`} color="text-green" />
         <Counter label="STATION" value={`${Math.min(state.station + 1, state.game.numStations)}/${state.game.numStations}`} color="text-blue" />
       </div>
 
       {/* the train */}
-      <motion.div className="flex-1 flex items-stretch gap-3 px-6 pb-6 min-h-0" animate={reveal && nCaught > 0 ? { x: [0, -8, 8, -6, 6, 0] } : {}} transition={{ duration: 0.5 }}>
+      <motion.div key={reveal ? "depart" : "board"} className="flex-1 flex items-stretch gap-3 px-6 pb-6 min-h-0" animate={reveal ? { x: [0, -40, 24, -12, 6, 0] } : { x: 0 }} transition={{ duration: 0.7 }}>
         {Array.from({ length: nWag }).map((_, w) => {
           const occ = perWagon[w];
           const isInsp = inspected.has(w);
