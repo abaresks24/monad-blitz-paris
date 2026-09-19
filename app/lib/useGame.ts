@@ -1,34 +1,46 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 
-export type StateSnapshot = {
+export type Snap = {
   ok: boolean;
-  error?: string;
   gameId: number;
   now: number;
   game: {
-    gm: string;
+    creator: string;
+    numWagons: number;
+    wagonCap: number;
+    numControllers: number;
     numStations: number;
-    commitDuration: number;
-    revealDuration: number;
+    boardDuration: number;
     startedAt: number;
-    finished: boolean;
+    started: boolean;
+    settled: boolean;
     playerCount: number;
+    entryFee: string;
+    pot: string;
     stationDuration: number;
     gameEnd: number;
   };
-  board: { addr: string; nick: string; pts: number; role: number }[];
-  activeStation: number;
-  phase: "lobby" | "commit" | "reveal" | "resolve" | "ended";
+  maxPlayers: number;
+  roster: { addr: string; nick: string }[];
+  phase: "lobby" | "board" | "reveal" | "ended";
+  station: number;
   phaseEndsAt: number;
-  dots: { addrs: string[]; committed: boolean[]; revealed: boolean[] } | null;
-  results: Record<number, { resolved: boolean; inspectedCars: number[]; addrs: string[]; cars: number[]; outcomes: number[] }>;
+  alive: boolean[];
+  survivors: number;
+  revealed: number;
+  lastReveal: { station: number; controllerWagons: number[]; caught: number[]; idleOut: number[]; wagonOf: number[] } | null;
+  currentBoarding: { wagons: number[]; counts: number[] } | null;
+  elimOnChain: boolean[];
+  finalRoles: number[] | null;
+  survivorAddrs: string[] | null;
+  potMon: string;
 };
 
 export function useGame(gameId: string | number = 0, intervalMs = 500) {
-  const [state, setState] = useState<StateSnapshot | null>(null);
+  const [state, setState] = useState<Snap | null>(null);
   const [connected, setConnected] = useState(false);
-  const skew = useRef(0); // serverNow - clientNow (seconds)
+  const skew = useRef(0);
 
   useEffect(() => {
     let alive = true;
@@ -36,15 +48,13 @@ export function useGame(gameId: string | number = 0, intervalMs = 500) {
     const tick = async () => {
       try {
         const r = await fetch(`/api/state?gameId=${gameId}`, { cache: "no-store" });
-        const j = (await r.json()) as StateSnapshot;
+        const j = await r.json();
         if (!alive) return;
         if (j.ok) {
           skew.current = j.now - Date.now() / 1000;
           setState(j);
           setConnected(true);
-        } else {
-          setConnected(false);
-        }
+        } else setConnected(false);
       } catch {
         if (alive) setConnected(false);
       } finally {
@@ -58,22 +68,20 @@ export function useGame(gameId: string | number = 0, intervalMs = 500) {
     };
   }, [gameId, intervalMs]);
 
-  // chain-synced "now" in seconds (client clock + measured skew)
   const nowSec = () => Date.now() / 1000 + skew.current;
   return { state, connected, nowSec };
 }
 
-/** A smooth 10fps countdown to a target unix timestamp, chain-synced. */
 export function useCountdown(target: number, nowSec: () => number) {
   const [remaining, setRemaining] = useState(0);
   useEffect(() => {
-    let raf: any;
+    let t: any;
     const loop = () => {
       setRemaining(Math.max(0, target - nowSec()));
-      raf = setTimeout(loop, 100);
+      t = setTimeout(loop, 100);
     };
     loop();
-    return () => clearTimeout(raf);
+    return () => clearTimeout(t);
   }, [target]); // eslint-disable-line react-hooks/exhaustive-deps
   return remaining;
 }

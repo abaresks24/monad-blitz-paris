@@ -14,29 +14,32 @@ export function getBurner(): { pk: Hex; address: Address } {
   return { pk, address: privateKeyToAccount(pk).address };
 }
 
-export function resetBurner() {
-  localStorage.removeItem(KEY);
-  localStorage.removeItem(NICK);
-  // also drop any per-game join records
-  Object.keys(localStorage)
-    .filter((k) => k.startsWith("rerb_join_"))
-    .forEach((k) => localStorage.removeItem(k));
-}
-
-export function saveNick(n: string) {
-  localStorage.setItem(NICK, n);
-}
 export function getNick(): string {
   return (typeof window !== "undefined" ? localStorage.getItem(NICK) : "") ?? "";
 }
-
-/** Persist the private role info returned by /api/join, tied to this game. */
-export type JoinInfo = { gameId: string; role: number; roleSalt: Hex; nickname: string };
-
-export function saveJoin(info: JoinInfo) {
-  localStorage.setItem(`rerb_join_${info.gameId}`, JSON.stringify(info));
+export function saveNick(n: string) {
+  localStorage.setItem(NICK, n);
 }
-export function getJoin(gameId: string): JoinInfo | null {
-  const raw = typeof window !== "undefined" ? localStorage.getItem(`rerb_join_${gameId}`) : null;
-  return raw ? (JSON.parse(raw) as JoinInfo) : null;
+
+export function markJoined(gameId: string) {
+  localStorage.setItem(`rerb_joined_${gameId}`, "1");
+}
+export function hasJoined(gameId: string): boolean {
+  return typeof window !== "undefined" && localStorage.getItem(`rerb_joined_${gameId}`) === "1";
+}
+
+export function saveHostToken(gameId: string, token: string) {
+  localStorage.setItem(`rerb_host_${gameId}`, token);
+}
+export function getHostToken(gameId: string): string | null {
+  return typeof window !== "undefined" ? localStorage.getItem(`rerb_host_${gameId}`) : null;
+}
+
+// cached role for this game (fetched from /api/myrole after start)
+export function saveRole(gameId: string, role: number, controllers?: string[]) {
+  localStorage.setItem(`rerb_role_${gameId}`, JSON.stringify({ role, controllers: controllers ?? [] }));
+}
+export function getRole(gameId: string): { role: number; controllers: string[] } | null {
+  const r = typeof window !== "undefined" ? localStorage.getItem(`rerb_role_${gameId}`) : null;
+  return r ? JSON.parse(r) : null;
 }

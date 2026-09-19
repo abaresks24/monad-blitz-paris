@@ -58,7 +58,7 @@ async function main() {
     return { key, address: privateKeyToAccount(key).address as Address, nick: NAMES[i % NAMES.length] + (i >= NAMES.length ? i : "") };
   });
   console.log(`funding ${N} bots...`);
-  await batchFromGM(gmKey, bots.map((b) => ({ to: b.address, value: FEE + parseEther("0.01") })));
+  await batchFromGM(gmKey, bots.map((b) => ({ to: b.address, value: FEE + parseEther("0.15") })));
   console.log(`bots joining (paying ${formatEther(FEE)} each)...`);
   await mapLimit(bots, 5, (b) => writeWithRetry(b.key, addr, "join", [gameId, b.nick], { value: FEE, label: `join ${b.nick}` }));
 

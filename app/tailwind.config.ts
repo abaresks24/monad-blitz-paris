@@ -5,32 +5,33 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        night: "#0B0F1A",
-        night2: "#111827",
-        rerb: "#3B82F6", // line B glowing blue
-        amber: "#F5A623", // quay display amber
-        led: "#FFB000", // dot-matrix amber
-        fine: "#EF4444", // hot red
-        paid: "#22C55E", // bright green
+        ink: "#0F1017", // deep night paper
+        ink2: "#181A26",
+        cream: "#F3E9D2", // paper / light ink
+        vermilion: "#FF4E3A", // riso red-orange (fine / eliminated)
+        blue: "#3B6BFF", // riso blue (line B)
+        yellow: "#FFC53D", // riso yellow accent
+        green: "#37C871", // survive
       },
       fontFamily: {
+        display: ["var(--font-display)", "Impact", "sans-serif"],
         sans: ["var(--font-sans)", "system-ui", "sans-serif"],
-        led: ["var(--font-led)", "monospace"],
       },
       boxShadow: {
-        neon: "0 0 20px rgba(59,130,246,0.55), 0 0 40px rgba(59,130,246,0.25)",
-        neonAmber: "0 0 18px rgba(245,166,35,0.6), 0 0 36px rgba(245,166,35,0.25)",
-        fine: "0 0 24px rgba(239,68,68,0.7)",
+        hard: "5px 5px 0 0 #0F1017",
+        hardCream: "5px 5px 0 0 #F3E9D2",
+        hardRed: "6px 6px 0 0 #FF4E3A",
+        hardBlue: "6px 6px 0 0 #3B6BFF",
       },
       keyframes: {
-        scanline: { "0%": { transform: "translateY(-100%)" }, "100%": { transform: "translateY(100%)" } },
-        flicker: { "0%,100%": { opacity: "1" }, "50%": { opacity: "0.82" } },
+        wobble: { "0%,100%": { transform: "translateY(0) rotate(-0.4deg)" }, "50%": { transform: "translateY(-3px) rotate(0.4deg)" } },
+        shake: { "0%,100%": { transform: "translateX(0)" }, "20%": { transform: "translateX(-6px)" }, "40%": { transform: "translateX(6px)" }, "60%": { transform: "translateX(-4px)" }, "80%": { transform: "translateX(4px)" } },
         marquee: { "0%": { transform: "translateX(0)" }, "100%": { transform: "translateX(-50%)" } },
       },
       animation: {
-        scanline: "scanline 6s linear infinite",
-        flicker: "flicker 3s ease-in-out infinite",
-        marquee: "marquee 22s linear infinite",
+        wobble: "wobble 3s ease-in-out infinite",
+        shake: "shake 0.5s ease-in-out",
+        marquee: "marquee 24s linear infinite",
       },
     },
   },

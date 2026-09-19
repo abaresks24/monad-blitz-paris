@@ -1,32 +1,45 @@
 import Link from "next/link";
+import { TicketMark } from "@/components/art";
 
 export default function Home() {
   return (
-    <main className="scanlines grain min-h-[100dvh] flex flex-col items-center justify-center gap-8 p-6 text-center">
-      <div className="space-y-2">
-        <div className="led text-2xl">◉ LIGNE B ◉</div>
-        <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight">
-          Fraude sur le <span className="text-rerb drop-shadow-[0_0_18px_rgba(59,130,246,0.7)]">RER B</span>
-        </h1>
-        <p className="max-w-xl text-gray-300 mt-4 text-lg">
-          Payez votre ticket ou fraudez. Des contrôleurs se cachent parmi vous.
-          <br /> Fraudeur contrôlé = <span className="text-fine font-bold">20 points d&apos;amende</span>.
-        </p>
+    <main className="paper halftone min-h-[100dvh] flex flex-col items-center justify-center gap-8 p-6 text-center">
+      <div className="flex items-center gap-3">
+        <TicketMark size={52} />
+        <span className="riso text-cream text-xl tracking-widest">LIGNE B</span>
       </div>
-      <div className="flex flex-wrap gap-4 justify-center">
-        <Link href="/play" className="glass neon-blue rounded-2xl px-8 py-4 text-xl font-bold hover:scale-105 transition">
-          📱 Jouer (/play)
-        </Link>
-        <Link href="/screen" className="glass rounded-2xl px-8 py-4 text-xl font-bold hover:scale-105 transition">
-          🖥️ Grand écran (/screen)
-        </Link>
-        <Link href="/admin" className="glass rounded-2xl px-8 py-4 text-xl font-bold hover:scale-105 transition">
-          🎛️ Admin
-        </Link>
-      </div>
-      <p className="text-xs text-gray-500 mt-8">
-        Jeu on-chain sur Monad Testnet • points de jeu uniquement, aucun argent réel • parodie, sans lien avec la RATP/SNCF/IDFM
+
+      <h1 className="riso riso-offset text-cream text-6xl md:text-8xl max-w-4xl">
+        Fraude sur le<br />RER B
+      </h1>
+
+      <p className="text-cream/90 text-2xl md:text-3xl font-semibold max-w-2xl">
+        Cachez-vous dans le bon wagon.
+        <br />
+        <span className="text-vermilion">Les contrôleurs rôdent.</span>
       </p>
+
+      <div className="card max-w-xl text-left p-5 space-y-2">
+        <p className="text-lg">
+          Chacun est <b>fraudeur</b> ou <b>contrôleur</b> — personne ne sait qui.
+        </p>
+        <p>
+          🚃 <b>Fraudeurs</b> : montez dans un wagon et priez pour éviter les contrôleurs.
+        </p>
+        <p>
+          🎩 <b>Contrôleurs</b> : coincez les fraudeurs de votre wagon. Ils sont éliminés.
+        </p>
+        <p className="text-vermilion font-bold">Les survivants raflent tout le pot à l&apos;arrivée.</p>
+      </div>
+
+      <div className="flex flex-wrap gap-4 justify-center">
+        <Link href="/play" className="btn bg-vermilion text-cream text-2xl px-10 py-4 rounded-xl">
+          Jouer
+        </Link>
+        <Link href="/screen" className="btn bg-cream text-ink text-2xl px-10 py-4 rounded-xl">
+          Grand écran
+        </Link>
+      </div>
     </main>
   );
 }

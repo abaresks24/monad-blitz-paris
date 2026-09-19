@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { serverPublic, cfg, jsonSafe, CONTRACT } from "@/lib/server";
+import { formatEther, type Address } from "viem";
+import { serverPublic, cfg, jsonSafe, CONTRACT, MASTER_SECRET } from "@/lib/server";
+import { assignRoles } from "@/lib/game";
+import { simulate, type BoardRec } from "@/lib/sim";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-// tiny in-memory TTL cache so many phones + the screen don't each hammer the RPC
 type Cached = { at: number; data: any };
 const cache = new Map<string, Cached>();
 const TTL = 400;
@@ -13,85 +15,131 @@ async function read(fn: string, args: any[] = []) {
   return serverPublic.readContract({ ...cfg(), functionName: fn, args });
 }
 
-function activeStation(g: any, now: number) {
-  if (!g.startedAt) return { station: -1, phase: "lobby", endsAt: 0 };
-  const sd = g.stationDuration;
-  const elapsed = now - g.startedAt;
-  const station = Math.floor(elapsed / sd);
-  if (station >= g.numStations) return { station: g.numStations, phase: "ended", endsAt: g.gameEnd };
-  const into = elapsed - station * sd;
-  const cs = g.startedAt + station * sd;
-  if (into < g.commitDuration) return { station, phase: "commit", endsAt: cs + g.commitDuration };
-  if (into < g.commitDuration + g.revealDuration)
-    return { station, phase: "reveal", endsAt: cs + g.commitDuration + g.revealDuration };
-  return { station, phase: "resolve", endsAt: cs + sd };
-}
-
 export async function GET(req: NextRequest) {
-  if (!CONTRACT) return NextResponse.json({ ok: false, error: "no contract configured" }, { status: 200 });
-  const gameId = req.nextUrl.searchParams.get("gameId") ?? "0";
-  const key = gameId;
-  const hit = cache.get(key);
+  if (!CONTRACT) return NextResponse.json({ ok: false, error: "no contract" });
+  let gameId = req.nextUrl.searchParams.get("gameId") ?? "0";
+  const hit = cache.get(gameId);
   if (hit && Date.now() - hit.at < TTL) return NextResponse.json(hit.data);
 
   try {
-    const gid = BigInt(gameId === "0" ? ((await read("gameCount")) as bigint).toString() : gameId);
+    if (gameId === "0") gameId = ((await read("gameCount")) as bigint).toString();
+    const gid = BigInt(gameId);
     const g = (await read("getGame", [gid])) as any[];
     const game = {
-      gm: g[0],
-      numStations: Number(g[1]),
-      commitDuration: Number(g[2]),
-      revealDuration: Number(g[3]),
-      startedAt: Number(g[4]),
-      finished: g[5],
-      playerCount: Number(g[6]),
-      stationDuration: Number(g[7]),
-      gameEnd: Number(g[8]),
+      creator: g[0],
+      numWagons: Number(g[1]),
+      wagonCap: Number(g[2]),
+      numControllers: Number(g[3]),
+      numStations: Number(g[4]),
+      boardDuration: Number(g[5]),
+      startedAt: Number(g[6]),
+      started: g[7],
+      settled: g[8],
+      playerCount: Number(g[9]),
+      entryFee: (g[10] as bigint).toString(),
+      pot: (g[11] as bigint).toString(),
+      stationDuration: Number(g[12]),
+      gameEnd: Number(g[13]),
     };
     const now = Number((await serverPublic.getBlock({ blockTag: "latest" })).timestamp);
-    const [addrs, nicks, pts, roles] = (await read("getBoard", [gid])) as [string[], string[], bigint[], number[]];
-    const board = addrs.map((a, i) => ({ addr: a, nick: nicks[i], pts: Number(pts[i]), role: Number(roles[i]) }));
+    const [addrs, nicks, rolesOnChain, elimOnChain] = (await read("getRoster", [gid])) as [
+      Address[],
+      string[],
+      number[],
+      boolean[],
+    ];
+    const maxPlayers = Number(await read("maxPlayers", [gid]));
 
-    const act = activeStation(game, now);
-    const st = act.station;
-
-    let dots: any = null;
-    if (st >= 0 && st < game.numStations) {
-      const [da, dc, dr] = (await read("getStationBoard", [gid, st])) as [string[], boolean[], boolean[]];
-      dots = { addrs: da, committed: dc, revealed: dr };
-    }
-
-    const results: Record<number, any> = {};
-    for (const s of [st - 1, st].filter((x) => x >= 0 && x < game.numStations)) {
-      const [resolved, inspectedCars, ra, cars, outcomes] = (await read("getStationResult", [gid, s])) as [
-        boolean,
-        number[],
-        string[],
-        number[],
-        number[],
-      ];
-      results[s] = {
-        resolved,
-        inspectedCars: (inspectedCars as any[]).map(Number),
-        addrs: ra,
-        cars: (cars as any[]).map(Number),
-        outcomes: (outcomes as any[]).map(Number),
-      };
-    }
-
-    const data = jsonSafe({
+    const base: any = {
       ok: true,
       gameId: Number(gid),
       now,
       game,
-      board,
-      activeStation: act.station,
-      phase: act.phase,
-      phaseEndsAt: act.endsAt,
-      dots,
-      results,
+      maxPlayers,
+      roster: addrs.map((a, i) => ({ addr: a, nick: nicks[i] })),
+    };
+
+    if (!game.started) {
+      const data = jsonSafe({ ...base, phase: "lobby", station: -1, alive: addrs.map(() => true), survivors: addrs.length });
+      cache.set(gameId, { at: Date.now(), data });
+      return NextResponse.json(data);
+    }
+
+    const sd = game.stationDuration;
+    const station = Math.min(Math.floor((now - game.startedAt) / sd), game.numStations);
+    const into = now - game.startedAt - station * sd;
+    const phase = station >= game.numStations ? "ended" : into < game.boardDuration ? "board" : "reveal";
+    const phaseEndsAt =
+      station >= game.numStations
+        ? game.gameEnd
+        : game.startedAt + station * sd + (into < game.boardDuration ? game.boardDuration : sd);
+
+    // roles are known server-side (deterministic) but NEVER sent to clients here
+    const roles = assignRoles(gid, addrs, MASTER_SECRET, game.numControllers);
+
+    // how many stations have finished their board window (reveal reached / past)?
+    let revealed = 0;
+    for (let s = 0; s < game.numStations; s++) {
+      if (now >= game.startedAt + s * sd + game.boardDuration) revealed = s + 1;
+    }
+
+    // fetch boarding for revealed stations, run the sim
+    const boarding: BoardRec[][] = [];
+    for (let s = 0; s < revealed; s++) {
+      const [, boarded, wagons] = (await read("getBoarding", [gid, s])) as [Address[], boolean[], number[], number[]];
+      boarding[s] = addrs.map((_, i) => ({ boarded: boarded[i], wagon: Number(wagons[i]) }));
+    }
+    const sim = revealed > 0 ? simulate(gid, game.numWagons, revealed, addrs, roles, boarding) : null;
+    const alive = sim ? sim.alive : addrs.map(() => true);
+    const lastReveal = sim && revealed > 0 ? sim.stations[revealed - 1] : null;
+
+    // live boarding fill for the CURRENT board station (public — this is how the train visibly fills)
+    let currentBoarding: { wagons: number[]; counts: number[] } | null = null;
+    if (phase === "board" && station < game.numStations) {
+      const [, boarded, wagons, counts] = (await read("getBoarding", [gid, station])) as [
+        Address[],
+        boolean[],
+        number[],
+        number[],
+      ];
+      currentBoarding = {
+        wagons: addrs.map((_, i) => (boarded[i] ? Number(wagons[i]) : -1)),
+        counts: (counts as any[]).map(Number),
+      };
+    }
+
+    const survivors = alive.filter(Boolean).length;
+    let finalRoles: number[] | null = null;
+    let survivorAddrs: string[] | null = null;
+    if (game.settled) {
+      finalRoles = (rolesOnChain as any[]).map(Number);
+      survivorAddrs = (await read("getSurvivors", [gid])) as string[];
+    }
+
+    const data = jsonSafe({
+      ...base,
+      phase,
+      station,
+      phaseEndsAt,
+      alive,
+      survivors,
+      revealed,
+      lastReveal: lastReveal
+        ? {
+            station: revealed - 1,
+            controllerWagons: lastReveal.controllerWagons,
+            caught: lastReveal.caught,
+            idleOut: lastReveal.idleOut,
+            wagonOf: lastReveal.wagonOf,
+          }
+        : null,
+      currentBoarding,
+      elimOnChain,
+      finalRoles, // null until settled
+      survivorAddrs,
+      potMon: formatEther(BigInt(game.pot)),
     });
-    cache.set(key, { at: Date.now(), data });
+    cache.set(gameId, { at: Date.now(), data });
     return NextResponse.json(data);
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.shortMessage ?? e?.message ?? "read failed" });

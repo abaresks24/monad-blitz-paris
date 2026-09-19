@@ -1,23 +1,22 @@
 "use client";
 import type { Hex } from "viem";
 import { walletFor, publicClient, CONTRACT_ADDRESS } from "./chain";
-import { FraudeRERB_ABI } from "./contract";
-import { commitHash, ZERO32, Action } from "./game";
+import { RERB_ABI } from "./contract";
 
-async function write(pk: Hex, fn: string, args: any[]) {
+async function write(pk: Hex, fn: string, args: any[], value?: bigint) {
   const wallet = walletFor(pk);
   const hash = await wallet.writeContract({
     address: CONTRACT_ADDRESS,
-    abi: FraudeRERB_ABI,
+    abi: RERB_ABI,
     functionName: fn,
     args,
+    value,
     account: wallet.account!,
   } as any);
   await publicClient.waitForTransactionReceipt({ hash });
   return hash;
 }
 
-/** Retry a client tx a couple of times (slow phone network / RPC hiccups). */
 async function withRetry<T>(fn: () => Promise<T>, tries = 3): Promise<T> {
   let last: any;
   for (let i = 0; i < tries; i++) {
@@ -26,35 +25,17 @@ async function withRetry<T>(fn: () => Promise<T>, tries = 3): Promise<T> {
     } catch (e: any) {
       last = e;
       const m = String(e?.shortMessage ?? e?.message ?? e);
-      if (/Already|Window|NotInCommit|NotInReveal/.test(m)) throw e; // terminal
+      if (/Already|WagonFull|NotBoardingWindow|WrongFee/.test(m)) throw e;
       await new Promise((r) => setTimeout(r, 400 * (i + 1)));
     }
   }
   throw last;
 }
 
-export async function sendCommit(
-  pk: Hex,
-  gameId: bigint,
-  station: number,
-  car: number,
-  action: number,
-  salt: Hex,
-  player: `0x${string}`
-) {
-  const h = commitHash(car, action, salt, player, station);
-  return withRetry(() => write(pk, "commit", [gameId, station, h]));
+export async function sendJoin(pk: Hex, gameId: bigint, nick: string, fee: bigint) {
+  return withRetry(() => write(pk, "join", [gameId, nick], fee));
 }
 
-export async function sendReveal(
-  pk: Hex,
-  gameId: bigint,
-  station: number,
-  car: number,
-  action: number,
-  salt: Hex,
-  roleSalt: Hex
-) {
-  const rs = action === Action.INSPECT ? roleSalt : ZERO32;
-  return withRetry(() => write(pk, "reveal", [gameId, station, car, action, salt, rs]));
+export async function sendBoard(pk: Hex, gameId: bigint, station: number, wagon: number) {
+  return withRetry(() => write(pk, "board", [gameId, station, wagon]));
 }

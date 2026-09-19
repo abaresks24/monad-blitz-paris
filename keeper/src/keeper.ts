@@ -72,7 +72,7 @@ async function main() {
       return { key, address: privateKeyToAccount(key).address as Address, nick: NAMES[i % NAMES.length] + (i >= NAMES.length ? i : "") };
     });
     console.log(`funding + joining ${bots.length} bots (fee ${formatEther(g.entryFee)} MON each)...`);
-    await batchFromGM(gmKey, bots.map((b) => ({ to: b.address, value: g.entryFee + parseEther("0.01") })));
+    await batchFromGM(gmKey, bots.map((b) => ({ to: b.address, value: g.entryFee + parseEther(process.env.BOT_FUND ?? "0.15") })));
     await mapLimit(bots, 5, (b) => writeWithRetry(b.key, addr, "join", [gameId, b.nick], { value: g.entryFee, label: `join ${b.nick}` }));
     writeFileSync(botsPath, JSON.stringify(bots));
     console.log(`bots in. Waiting for host to press Lancer...`);
@@ -88,17 +88,21 @@ async function main() {
   const keyByAddr = new Map(bots.map((b) => [b.address.toLowerCase(), b.key] as const));
   console.log(`▶️ started — ${players.length} joueurs, ${g.numControllers} contrôleurs. Driving ${bots.length} bots.`);
 
-  // drive bots each station
+  // drive bots each station (resilient: a hiccup on one station must not skip settle)
   for (let s = 0; s < g.numStations; s++) {
-    const [bStart] = (await readContract(addr, "stationWindow", [gameId, s])) as bigint[];
-    await waitUntilChain(Number(bStart), `board st${s + 1}`);
-    const prior = await fetchBoarding(addr, gameId, s, players);
-    const alive = s === 0 ? players.map(() => true) : simEliminations(gameId, g.numWagons, s, players, roles as number[], prior).alive;
-    const boarders = players.map((p, i) => ({ p, i })).filter(({ p, i }) => alive[i] && keyByAddr.has(p.toLowerCase()));
-    await mapLimit(boarders, 5, ({ p }) =>
-      writeWithRetry(keyByAddr.get(p.toLowerCase())!, addr, "board", [gameId, s, spread(gameId, p, s, g.numWagons)], { label: `board st${s}` })
-    );
-    console.log(`  station ${s + 1}: bots montés`);
+    try {
+      const [bStart] = (await readContract(addr, "stationWindow", [gameId, s])) as bigint[];
+      await waitUntilChain(Number(bStart), `board st${s + 1}`);
+      const prior = await fetchBoarding(addr, gameId, s, players);
+      const alive = s === 0 ? players.map(() => true) : simEliminations(gameId, g.numWagons, s, players, roles as number[], prior).alive;
+      const boarders = players.map((p, i) => ({ p, i })).filter(({ p, i }) => alive[i] && keyByAddr.has(p.toLowerCase()));
+      await mapLimit(boarders, 5, ({ p }) =>
+        writeWithRetry(keyByAddr.get(p.toLowerCase())!, addr, "board", [gameId, s, spread(gameId, p, s, g.numWagons)], { label: `board st${s}` })
+      );
+      console.log(`  station ${s + 1}: bots montés`);
+    } catch (e: any) {
+      console.warn(`  station ${s + 1} hiccup: ${e?.shortMessage ?? e?.message} — continuing`);
+    }
   }
 
   // settle

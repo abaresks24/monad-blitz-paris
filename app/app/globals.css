@@ -8,73 +8,80 @@
 
 html,
 body {
-  background: #0b0f1a;
-  color: #e5e7eb;
+  background: #0f1017;
+  color: #f3e9d2;
   overscroll-behavior: none;
   -webkit-tap-highlight-color: transparent;
 }
 
-/* Parisian-night background: deep radial glows + subtle grid */
-.bg-metro {
+/* riso screenprint paper: flat night with heavy grain + faint halftone */
+.paper {
+  position: relative;
   background:
-    radial-gradient(1200px 600px at 15% -10%, rgba(59, 130, 246, 0.18), transparent 60%),
-    radial-gradient(1000px 500px at 110% 10%, rgba(245, 166, 35, 0.1), transparent 55%),
-    linear-gradient(180deg, #0b0f1a 0%, #0a0e18 100%);
+    radial-gradient(1100px 700px at 12% -8%, rgba(59, 107, 255, 0.16), transparent 60%),
+    radial-gradient(900px 600px at 108% 4%, rgba(255, 78, 58, 0.12), transparent 55%),
+    #0f1017;
 }
-
-/* faint scanlines overlay */
-.scanlines::after {
+.paper::before {
   content: "";
   position: fixed;
   inset: 0;
+  z-index: 60;
   pointer-events: none;
-  background: repeating-linear-gradient(
-    to bottom,
-    rgba(255, 255, 255, 0.03) 0px,
-    rgba(255, 255, 255, 0.03) 1px,
-    transparent 2px,
-    transparent 4px
-  );
+  opacity: 0.09;
   mix-blend-mode: overlay;
-  z-index: 50;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
-
-/* film grain */
-.grain::before {
+/* halftone dots overlay for that printed feel */
+.halftone::after {
   content: "";
-  position: fixed;
-  inset: -50%;
+  position: absolute;
+  inset: 0;
   pointer-events: none;
-  opacity: 0.05;
-  z-index: 49;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: 0.06;
+  background-image: radial-gradient(#f3e9d2 1px, transparent 1.4px);
+  background-size: 6px 6px;
 }
 
-.led {
-  font-family: var(--font-led), monospace;
-  letter-spacing: 0.06em;
-  color: #ffb000;
-  text-shadow: 0 0 8px rgba(255, 176, 0, 0.75), 0 0 2px rgba(255, 176, 0, 0.9);
+/* poster title with riso mis-registration offset */
+.riso {
+  font-family: var(--font-display), Impact, sans-serif;
+  letter-spacing: 0.01em;
+  line-height: 0.92;
+  text-transform: uppercase;
+}
+.riso-offset {
+  text-shadow: 3px 3px 0 #ff4e3a, -2px -2px 0 #3b6bff;
 }
 
-.led-green {
-  color: #7CFC7C;
-  text-shadow: 0 0 8px rgba(80, 252, 80, 0.7);
+/* flat poster card: cream panel, thick ink border, hard offset shadow (no blur, no glass) */
+.card {
+  background: #f3e9d2;
+  color: #0f1017;
+  border: 3px solid #0f1017;
+  box-shadow: 6px 6px 0 0 #0f1017;
+}
+.card-dark {
+  background: #181a26;
+  color: #f3e9d2;
+  border: 3px solid #f3e9d2;
+  box-shadow: 6px 6px 0 0 #ff4e3a;
 }
 
-.glass {
-  background: rgba(17, 24, 39, 0.6);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+.btn {
+  font-family: var(--font-display), Impact, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  border: 3px solid #0f1017;
+  box-shadow: 5px 5px 0 0 #0f1017;
+  transition: transform 0.05s ease, box-shadow 0.05s ease;
 }
-
-.neon-blue {
-  box-shadow: 0 0 20px rgba(59, 130, 246, 0.55), 0 0 40px rgba(59, 130, 246, 0.22);
+.btn:active {
+  transform: translate(4px, 4px);
+  box-shadow: 1px 1px 0 0 #0f1017;
 }
-
-.card-3d {
-  transform-style: preserve-3d;
-  perspective: 1000px;
+.btn:disabled {
+  opacity: 0.45;
 }
 
 .no-select {
@@ -87,6 +94,5 @@ body {
   height: 6px;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
-  border-radius: 3px;
+  background: rgba(243, 233, 210, 0.25);
 }

@@ -1,4 +1,5 @@
 import "server-only";
+import { createHmac } from "node:crypto";
 import { createPublicClient, createWalletClient, http, fallback, defineChain, type Hex, type Address } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import abi from "./abi.json";
@@ -21,7 +22,18 @@ export const CONTRACT = (process.env.CONTRACT_ADDRESS ?? process.env.NEXT_PUBLIC
 export const MASTER_SECRET = process.env.MASTER_SECRET ?? "blitz-demo-secret";
 export const ROLE_DENOM = Number(process.env.ROLE_DENOM ?? 8);
 export const ADMIN_SECRET = process.env.ADMIN_SECRET ?? "change-me";
-export const BURNER_FUND_MON = process.env.BURNER_FUND_MON ?? "0.03";
+export const BURNER_FUND_MON = process.env.BURNER_FUND_MON ?? "0.05";
+export const ENTRY_FEE_MON = process.env.ENTRY_FEE ?? "0.001";
+
+// Host token authorizes start/settle for a game. Derived deterministically from MASTER_SECRET
+// so any serverless instance can verify it without shared state — only the game's creator ever
+// receives it (from /api/create). ADMIN_SECRET is an override.
+export function hostTokenFor(gameId: string): string {
+  return createHmac("sha256", MASTER_SECRET).update(`host:${gameId}`).digest("hex");
+}
+export function isHost(gameId: string, token: string): boolean {
+  return token === ADMIN_SECRET || token === hostTokenFor(gameId);
+}
 
 export const serverChain = defineChain({
   id: CHAIN_ID,

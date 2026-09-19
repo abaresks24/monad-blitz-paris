@@ -1,17 +1,17 @@
 import type { Metadata, Viewport } from "next";
-import { Baloo_2, VT323 } from "next/font/google";
+import { Anton, Archivo } from "next/font/google";
 import "./globals.css";
 
-const sans = Baloo_2({ subsets: ["latin"], variable: "--font-sans", weight: ["400", "500", "600", "700", "800"] });
-const led = VT323({ subsets: ["latin"], variable: "--font-led", weight: "400" });
+const display = Anton({ subsets: ["latin"], weight: "400", variable: "--font-display" });
+const sans = Archivo({ subsets: ["latin"], weight: ["400", "500", "600", "700", "800"], variable: "--font-sans" });
 
 export const metadata: Metadata = {
   title: "Fraude sur le RER B",
-  description: "Payez votre ticket ou fraudez. Des contrôleurs se cachent parmi vous.",
+  description: "Cachez-vous dans le bon wagon. Les contrôleurs rôdent.",
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0B0F1A",
+  themeColor: "#0F1017",
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
@@ -20,8 +20,8 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="fr" className={`${sans.variable} ${led.variable}`}>
-      <body className="font-sans bg-metro min-h-[100dvh] antialiased">{children}</body>
+    <html lang="fr" className={`${display.variable} ${sans.variable}`}>
+      <body className="font-sans paper min-h-[100dvh] antialiased">{children}</body>
     </html>
   );
 }

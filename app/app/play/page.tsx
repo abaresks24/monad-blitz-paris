@@ -1,406 +1,378 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import type { Hex } from "viem";
-import { getBurner, getJoin, saveJoin, getNick, saveNick, type JoinInfo } from "@/lib/burner";
+import { parseEther, type Hex } from "viem";
+import { getBurner, getNick, saveNick, markJoined, hasJoined, saveHostToken, getHostToken, saveRole, getRole } from "@/lib/burner";
 import { walletFor } from "@/lib/chain";
-import { Action, Role, CARS } from "@/lib/game";
-import { useGame, useCountdown } from "@/lib/useGame";
-import { sendCommit, sendReveal } from "@/lib/tx";
-import { Avatar } from "@/components/Avatar";
-
-function randSalt(): Hex {
-  const b = new Uint8Array(32);
-  crypto.getRandomValues(b);
-  return ("0x" + Array.from(b).map((x) => x.toString(16).padStart(2, "0")).join("")) as Hex;
-}
-
-type Choice = { car: number; action: number; salt: Hex };
-const choiceKey = (g: number, s: number) => `rerb_choice_${g}_${s}`;
-function saveChoice(g: number, s: number, c: Choice) {
-  localStorage.setItem(choiceKey(g, s), JSON.stringify(c));
-}
-function loadChoice(g: number, s: number): Choice | null {
-  const r = localStorage.getItem(choiceKey(g, s));
-  return r ? (JSON.parse(r) as Choice) : null;
-}
+import { Role } from "@/lib/game";
+import { useGame, useCountdown, type Snap } from "@/lib/useGame";
+import { sendJoin, sendBoard } from "@/lib/tx";
+import { Passenger, Controleur, TicketMark } from "@/components/art";
+import { startMusic, stopMusic, isMusicOn, setSfxEnabled, playBoard, playEliminate, playSurvive, playTick } from "@/lib/sound";
 
 export default function Play() {
-  const { state, connected } = useGame(0, 700);
+  const { state, connected } = useGame(0, 600);
   const [burner, setBurner] = useState<{ pk: Hex; address: `0x${string}` } | null>(null);
-  const [join, setJoin] = useState<JoinInfo | null>(null);
-  const [nick, setNick] = useState("");
+  useEffect(() => setBurner(getBurner()), []);
 
-  useEffect(() => {
-    const b = getBurner();
-    setBurner(b);
-    setNick(getNick());
-  }, []);
+  if (!burner || !state) return <Splash>{connected === false ? "Connexion…" : "Chargement du quai…"}</Splash>;
 
-  const gameId = state?.gameId ?? 0;
-  useEffect(() => {
-    if (gameId) setJoin(getJoin(String(gameId)));
-  }, [gameId]);
+  const gid = String(state.gameId);
+  const meIndex = state.roster.findIndex((r) => r.addr.toLowerCase() === burner.address.toLowerCase());
+  const amIn = meIndex >= 0 && hasJoined(gid);
 
-  if (!burner) return <Splash>Chargement…</Splash>;
-  if (!state) return <Splash>{connected ? "Connexion au train…" : "Connexion…"}</Splash>;
-  if (!join) return <JoinScreen burner={burner} gameId={gameId} nick={nick} setNick={setNick} onJoined={(j) => setJoin(j)} state={state} />;
-  return <GameScreen burner={burner} join={join} />;
+  if (!amIn) return <Entry burner={burner} state={state} />;
+  return <Game burner={burner} state={state} meIndex={meIndex} />;
 }
 
 function Splash({ children }: { children: React.ReactNode }) {
   return (
-    <main className="scanlines grain min-h-[100dvh] flex items-center justify-center p-6">
-      <div className="led text-2xl animate-flicker">{children}</div>
+    <main className="paper min-h-[100dvh] flex items-center justify-center p-6">
+      <div className="riso text-cream text-2xl animate-wobble">{children}</div>
     </main>
   );
 }
 
-function JoinScreen({
-  burner,
-  gameId,
-  nick,
-  setNick,
-  onJoined,
-  state,
-}: {
-  burner: { pk: Hex; address: `0x${string}` };
-  gameId: number;
-  nick: string;
-  setNick: (s: string) => void;
-  onJoined: (j: JoinInfo) => void;
-  state: any;
-}) {
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const started = state?.game?.startedAt > 0;
+function MuteButton() {
+  const [on, setOn] = useState(false);
+  return (
+    <button
+      onClick={() => {
+        if (on) { stopMusic(); setSfxEnabled(false); } else { startMusic(); setSfxEnabled(true); }
+        setOn(!on);
+      }}
+      className="btn bg-cream text-ink text-xs px-3 py-1 rounded-lg"
+    >
+      {on ? "♪ ON" : "♪ OFF"}
+    </button>
+  );
+}
 
-  async function join() {
-    setError("");
-    const name = nick.trim();
-    if (name.length < 1) return setError("Choisis un pseudo");
-    setLoading(true);
+/* ------------------------------------------------------------------ ENTRY (create / join) */
+function Entry({ burner, state }: { burner: { pk: Hex; address: `0x${string}` }; state: Snap }) {
+  const [nick, setNick] = useState(getNick());
+  const [busy, setBusy] = useState("");
+  const [err, setErr] = useState("");
+  const [mode, setMode] = useState<"pick" | "create">("pick");
+  const [wagons, setWagons] = useState(4);
+  const [controllers, setControllers] = useState(2);
+  const [stations, setStations] = useState(4);
+
+  const g = state.game;
+  const joinable = g.started === false && g.creator !== "0x0000000000000000000000000000000000000000";
+  const gid = String(state.gameId);
+  const feeMon = g.entryFee ? (Number(g.entryFee) / 1e18).toFixed(4) : "0.001";
+
+  async function fundAndJoin(gameId: string, fee: bigint) {
+    await fetch("/api/fund", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ address: burner.address }) });
+    await sendJoin(burner.pk, BigInt(gameId), nick.trim(), fee);
+    markJoined(gameId);
+  }
+
+  async function doJoin() {
+    setErr(""); if (!nick.trim()) return setErr("Choisis un pseudo");
+    setBusy("Embarquement…"); saveNick(nick.trim()); startMusic(); setSfxEnabled(true);
     try {
-      saveNick(name);
-      const msg = `RER B — je monte dans le train\njeu #${gameId}\npseudo: ${name}`;
-      const signature = await walletFor(burner.pk).signMessage({ account: walletFor(burner.pk).account!, message: msg });
-      const r = await fetch("/api/join", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ gameId: String(gameId), address: burner.address, nickname: name, signature }),
-      });
+      await fundAndJoin(gid, BigInt(g.entryFee));
+    } catch (e: any) { setErr(e?.shortMessage ?? e?.message ?? "échec"); } finally { setBusy(""); }
+  }
+
+  async function doCreate() {
+    setErr(""); if (!nick.trim()) return setErr("Choisis un pseudo");
+    setBusy("Création…"); saveNick(nick.trim()); startMusic(); setSfxEnabled(true);
+    try {
+      const r = await fetch("/api/create", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ numWagons: wagons, numControllers: controllers, numStations: stations }) });
       const j = await r.json();
-      if (!j.ok) throw new Error(j.error ?? "échec");
-      const info: JoinInfo = { gameId: String(gameId), role: j.role, roleSalt: j.roleSalt, nickname: name };
-      saveJoin(info);
-      onJoined(info);
-    } catch (e: any) {
-      setError(e?.shortMessage ?? e?.message ?? "échec");
-    } finally {
-      setLoading(false);
-    }
+      if (!j.ok) throw new Error(j.error);
+      saveHostToken(j.gameId, j.hostToken);
+      await fundAndJoin(j.gameId, parseEther(j.entryFee));
+    } catch (e: any) { setErr(e?.shortMessage ?? e?.message ?? "échec"); } finally { setBusy(""); }
   }
 
   return (
-    <main className="scanlines grain min-h-[100dvh] flex flex-col items-center justify-center gap-6 p-6 text-center">
-      <div className="led text-xl">◉ RER B — VOITURE D&apos;EMBARQUEMENT ◉</div>
-      <h1 className="text-4xl font-extrabold">Monte dans le train</h1>
-      <div className="flex flex-col items-center gap-3">
-        <Avatar seed={nick || burner.address} size={96} ring="#3B82F6" />
-        <input
-          value={nick}
-          onChange={(e) => setNick(e.target.value)}
-          maxLength={20}
-          placeholder="Ton pseudo"
-          className="glass rounded-2xl px-5 py-4 text-2xl text-center w-72 outline-none focus:shadow-neon"
-        />
-      </div>
-      {started ? (
-        <p className="text-amber text-lg">⚠️ Le train est déjà parti. Attends la prochaine partie.</p>
-      ) : (
-        <button
-          onClick={join}
-          disabled={loading}
-          className="rounded-2xl px-10 py-5 text-2xl font-extrabold bg-rerb neon-blue disabled:opacity-50 active:scale-95 transition"
-        >
-          {loading ? "Embarquement…" : "MONTER DANS LE TRAIN 🚇"}
-        </button>
+    <main className="paper halftone min-h-[100dvh] flex flex-col items-center justify-center gap-5 p-6">
+      <div className="flex items-center gap-2"><TicketMark size={40} /><span className="riso text-cream text-lg">RER B</span></div>
+      <Passenger seed={nick || burner.address} size={96} />
+      <input
+        value={nick} onChange={(e) => setNick(e.target.value)} maxLength={18} placeholder="TON PSEUDO"
+        className="card riso text-2xl text-center px-5 py-3 w-72 outline-none rounded-xl placeholder:text-ink/40"
+      />
+
+      {mode === "pick" && (
+        <div className="flex flex-col gap-3 w-72">
+          {joinable ? (
+            <button onClick={doJoin} disabled={!!busy} className="btn bg-vermilion text-cream text-2xl py-4 rounded-xl">
+              Rejoindre #{gid}
+              <div className="text-sm font-sans normal-case">{g.playerCount}/{state.maxPlayers} • mise {feeMon} MON</div>
+            </button>
+          ) : (
+            <div className="card p-3 text-center text-sm">Partie #{gid} déjà lancée. Crée la tienne 👇</div>
+          )}
+          <button onClick={() => setMode("create")} disabled={!!busy} className="btn bg-blue text-cream text-xl py-3 rounded-xl">
+            Créer une partie
+          </button>
+        </div>
       )}
-      {error && <p className="text-fine">{error}</p>}
-      <p className="text-xs text-gray-500 max-w-xs">
-        Un wallet de jeu est créé sur ton téléphone. Aucun argent réel — que des points. Jeu #{gameId}.
-      </p>
+
+      {mode === "create" && (
+        <div className="card p-4 w-80 space-y-3">
+          <Stepper label="Wagons" v={wagons} set={(n) => { setWagons(n); if (controllers > n * 3 - 1) setControllers(Math.max(1, n * 3 - 1)); }} min={2} max={8} />
+          <Stepper label="Contrôleurs" v={controllers} set={setControllers} min={1} max={wagons * 3 - 1} />
+          <Stepper label="Stations" v={stations} set={setStations} min={1} max={10} />
+          <div className="text-xs text-ink/70">Jusqu&apos;à {wagons * 3} joueurs • 5 par wagon max • mise {feeMon} MON</div>
+          <div className="flex gap-2">
+            <button onClick={() => setMode("pick")} className="btn bg-cream text-ink px-4 py-2 rounded-lg text-sm flex-1">Retour</button>
+            <button onClick={doCreate} disabled={!!busy} className="btn bg-vermilion text-cream px-4 py-2 rounded-lg flex-[2]">Créer & rejoindre</button>
+          </div>
+        </div>
+      )}
+
+      {busy && <div className="riso text-yellow text-xl animate-wobble">{busy}</div>}
+      {err && <div className="text-vermilion font-bold text-center max-w-xs">{err}</div>}
+      <p className="text-cream/50 text-xs max-w-xs text-center">Un porte-monnaie de jeu est créé et rechargé automatiquement sur ton téléphone.</p>
     </main>
   );
 }
 
-function GameScreen({ burner, join }: { burner: { pk: Hex; address: `0x${string}` }; join: JoinInfo }) {
-  const { state, connected } = useGame(0, 600);
-  const [peek, setPeek] = useState(false);
-  const [committing, setCommitting] = useState(false);
-  const [pendingCar, setPendingCar] = useState<number | null>(null);
-  const [localCommitted, setLocalCommitted] = useState<Record<number, boolean>>({});
-  const [localRevealed, setLocalRevealed] = useState<Record<number, boolean>>({});
-  const revealingRef = useRef<Record<number, boolean>>({});
-  const [error, setError] = useState("");
+function Stepper({ label, v, set, min, max }: { label: string; v: number; set: (n: number) => void; min: number; max: number }) {
+  return (
+    <div className="flex items-center justify-between">
+      <span className="riso text-lg">{label}</span>
+      <div className="flex items-center gap-3">
+        <button onClick={() => set(Math.max(min, v - 1))} className="btn bg-ink text-cream w-9 h-9 rounded-lg text-xl leading-none">–</button>
+        <span className="riso text-2xl w-8 text-center">{v}</span>
+        <button onClick={() => set(Math.min(max, v + 1))} className="btn bg-ink text-cream w-9 h-9 rounded-lg text-xl leading-none">+</button>
+      </div>
+    </div>
+  );
+}
 
-  const isCtrl = join.role === Role.CONTROLEUR;
-  const gid = state ? BigInt(state.gameId) : 0n;
-  const station = state?.activeStation ?? -1;
-  const phase = state?.phase ?? "lobby";
+/* ------------------------------------------------------------------ GAME */
+function Game({ burner, state, meIndex }: { burner: { pk: Hex; address: `0x${string}` }; state: Snap; meIndex: number }) {
+  const g = state.game;
+  const gid = String(state.gameId);
+  const host = getHostToken(gid);
+  const [role, setRole] = useState<{ role: number; controllers: string[] } | null>(getRole(gid));
+  const [busy, setBusy] = useState("");
+  const [myWagon, setMyWagon] = useState<number | null>(null);
+  const alive = state.alive[meIndex];
 
-  const me = state?.board.find((b) => b.addr.toLowerCase() === burner.address.toLowerCase());
-  const myDotIdx = state?.dots ? state.dots.addrs.findIndex((a) => a.toLowerCase() === burner.address.toLowerCase()) : -1;
-  const committedOnChain = myDotIdx >= 0 && state?.dots?.committed[myDotIdx];
-  const committed = phase !== "lobby" && (committedOnChain || localCommitted[station]);
-
-  // ---- auto-reveal ----
+  // fetch my role once started
   useEffect(() => {
-    if (!state || phase !== "reveal" || station < 0) return;
-    const choice = loadChoice(state.gameId, station);
-    if (!choice) return;
-    if (localRevealed[station] || revealingRef.current[station]) return;
-    revealingRef.current[station] = true;
-    (async () => {
-      try {
-        await sendReveal(burner.pk, gid, station, choice.car, choice.action, choice.salt, join.roleSalt as Hex);
-        setLocalRevealed((m) => ({ ...m, [station]: true }));
-      } catch {
-        revealingRef.current[station] = false; // allow retry next tick
-      }
-    })();
-  }, [phase, station, state?.gameId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  async function confirmChoice(action: number) {
-    if (pendingCar === null || station < 0 || !state) return;
-    setError("");
-    setCommitting(true);
-    const salt = randSalt();
-    const car = pendingCar;
-    try {
-      saveChoice(state.gameId, station, { car, action, salt });
-      setLocalCommitted((m) => ({ ...m, [station]: true }));
-      await sendCommit(burner.pk, gid, station, car, action, salt, burner.address);
-    } catch (e: any) {
-      setError(e?.shortMessage ?? "réseau lent, réessaie");
-      setLocalCommitted((m) => ({ ...m, [station]: false }));
-    } finally {
-      setCommitting(false);
-      setPendingCar(null);
+    if (g.started && !role) {
+      (async () => {
+        try {
+          const message = `RER B — quel est mon rôle ?\njeu #${gid}`;
+          const w = walletFor(burner.pk);
+          const signature = await w.signMessage({ account: w.account!, message });
+          const r = await fetch("/api/myrole", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ gameId: gid, address: burner.address, signature }) });
+          const j = await r.json();
+          if (j.ok) { saveRole(gid, j.role, j.controllers); setRole({ role: j.role, controllers: j.controllers ?? [] }); }
+        } catch {}
+      })();
     }
+  }, [g.started, gid, role, burner]);
+
+  // reflect on-chain current wagon
+  useEffect(() => {
+    if (state.currentBoarding && state.currentBoarding.wagons[meIndex] >= 0) setMyWagon(state.currentBoarding.wagons[meIndex]);
+    else if (state.phase === "board") setMyWagon(null);
+  }, [state.station, state.phase]); // eslint-disable-line
+
+  async function board(w: number) {
+    if (!alive || state.phase !== "board") return;
+    setMyWagon(w); playBoard();
+    try { await sendBoard(burner.pk, BigInt(gid), state.station, w); } catch {}
   }
 
-  // ---- result overlay ----
-  const myResult = useMemo(() => {
-    if (!state) return null;
-    // show the most recently resolved station's outcome for me
-    const resolvedStations = Object.keys(state.results)
-      .map(Number)
-      .filter((s) => state.results[s]?.resolved)
-      .sort((a, b) => b - a);
-    for (const s of resolvedStations) {
-      const r = state.results[s];
-      const i = r.addrs.findIndex((a) => a.toLowerCase() === burner.address.toLowerCase());
-      if (i >= 0) return { station: s, outcome: r.outcomes[i], car: r.cars[i] };
-    }
-    return null;
-  }, [state, burner.address]);
+  async function hostAction(action: "start" | "settle") {
+    setBusy(action); try {
+      await fetch(`/api/${action}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ gameId: gid, hostToken: host }) });
+    } finally { setBusy(""); }
+  }
 
-  const lastSeenResult = useRef<number>(-1);
-  useEffect(() => {
-    if (myResult && myResult.station !== lastSeenResult.current) {
-      lastSeenResult.current = myResult.station;
-      if (myResult.outcome === 3 && navigator.vibrate) navigator.vibrate([120, 60, 120]);
-      else if (navigator.vibrate) navigator.vibrate(40);
-    }
-  }, [myResult]);
-
-  if (!state) return <Splash>Connexion…</Splash>;
+  const iAmController = role?.role === Role.CONTROLEUR;
 
   return (
-    <main className="scanlines grain min-h-[100dvh] flex flex-col p-4 gap-3 no-select">
-      {/* header */}
-      <header className="glass rounded-2xl px-4 py-2 flex items-center gap-3">
-        <Avatar seed={join.nickname} size={40} ring={isCtrl ? "#F5A623" : "#3B82F6"} />
+    <main className="paper min-h-[100dvh] flex flex-col p-4 gap-3 no-select">
+      <header className="card px-4 py-2 flex items-center gap-3 rounded-xl">
+        <Passenger seed={getNick()} size={34} />
         <div className="flex-1 min-w-0">
-          <div className="font-bold truncate">{join.nickname}</div>
-          <div className="text-xs text-gray-400">{connected ? "en ligne" : "reconnexion…"}</div>
+          <div className="riso text-lg truncate">{getNick()}</div>
+          {role && <div className={`text-xs font-bold ${iAmController ? "text-vermilion" : "text-blue"}`}>{iAmController ? "🎩 CONTRÔLEUR" : "🚃 FRAUDEUR"}</div>}
         </div>
         <div className="text-right">
-          <div className="text-2xl font-extrabold text-paid">{me ? me.pts : 100}</div>
-          <div className="text-[10px] text-gray-400 -mt-1">points</div>
+          <div className="riso text-xl text-vermilion leading-none">{Number(state.potMon).toFixed(3)}</div>
+          <div className="text-[10px]">MON · pot</div>
         </div>
+        <MuteButton />
       </header>
 
-      {/* role card */}
-      <RoleCard isCtrl={isCtrl} peek={peek} setPeek={setPeek} />
+      {role && iAmController && role.controllers.length > 1 && state.phase !== "ended" && (
+        <div className="card-dark rounded-xl px-3 py-1.5 text-xs">🎩 Coéquipiers contrôleurs : {role.controllers.length} en tout (ne vous entassez pas dans le même wagon)</div>
+      )}
 
-      {/* main play area */}
-      <div className="flex-1 flex flex-col justify-center">
+      <div className="flex-1 flex flex-col min-h-0">
         <AnimatePresence mode="wait">
-          {phase === "lobby" && (
-            <Center key="lobby">
-              <div className="led text-2xl animate-flicker">EN ATTENTE DU DÉPART…</div>
-              <p className="text-gray-400 mt-2">Le train part bientôt. Garde ton rôle secret 🤫</p>
-            </Center>
+          {g.started === false && <Lobby key="lobby" state={state} host={host} onStart={() => hostAction("start")} busy={busy} />}
+          {g.started && state.phase !== "ended" && (
+            alive
+              ? <PlayView key="play" state={state} meIndex={meIndex} myWagon={myWagon} onBoard={board} iAmController={iAmController} />
+              : <Spectator key="spec" state={state} />
           )}
-
-          {(phase === "commit" || phase === "resolve") && !committed && phase === "commit" && (
-            <motion.div key="choose" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-              <PhaseBanner phase="commit" endsAt={state.phaseEndsAt} nowSec={() => state.now} />
-              <p className="text-center text-gray-300 mb-2">Choisis ta voiture</p>
-              <div className="grid grid-cols-4 gap-2 mb-4">
-                {Array.from({ length: CARS }).map((_, c) => (
-                  <button
-                    key={c}
-                    onClick={() => setPendingCar(c)}
-                    className={`aspect-square rounded-2xl text-2xl font-extrabold transition active:scale-95 ${
-                      pendingCar === c ? "bg-rerb neon-blue" : "glass"
-                    }`}
-                  >
-                    {c + 1}
-                  </button>
-                ))}
-              </div>
-              {isCtrl ? (
-                <button
-                  disabled={pendingCar === null || committing}
-                  onClick={() => confirmChoice(Action.INSPECT)}
-                  className="w-full rounded-2xl py-6 text-2xl font-extrabold bg-amber text-black shadow-neonAmber disabled:opacity-40 active:scale-95"
-                >
-                  🕵️ INSPECTER CETTE VOITURE
-                </button>
-              ) : (
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    disabled={pendingCar === null || committing}
-                    onClick={() => confirmChoice(Action.PAY)}
-                    className="rounded-2xl py-8 text-2xl font-extrabold bg-paid text-black disabled:opacity-40 active:scale-95"
-                  >
-                    PAYER 🎫
-                    <div className="text-sm font-medium opacity-80">−2 pts</div>
-                  </button>
-                  <button
-                    disabled={pendingCar === null || committing}
-                    onClick={() => confirmChoice(Action.FRAUD)}
-                    className="rounded-2xl py-8 text-2xl font-extrabold bg-fine disabled:opacity-40 active:scale-95"
-                  >
-                    FRAUDER 🏃
-                    <div className="text-sm font-medium opacity-80">gratuit… risqué</div>
-                  </button>
-                </div>
-              )}
-              {error && <p className="text-fine text-center mt-3">{error}</p>}
-            </motion.div>
-          )}
-
-          {(committed || phase === "reveal") && !myResultActive(myResult, station) && phase !== "ended" && (
-            <Center key="locked">
-              <motion.div initial={{ scale: 0.8 }} animate={{ scale: 1 }} className="text-6xl mb-3">
-                🔒
-              </motion.div>
-              <div className="text-2xl font-extrabold">Choix verrouillé</div>
-              <p className="text-gray-400 mt-1">
-                {phase === "reveal" ? "Révélation automatique en cours…" : "En attente des autres passagers…"}
-              </p>
-            </Center>
-          )}
-
-          {phase === "ended" && (
-            <Center key="ended">
-              <div className="led text-3xl">TERMINUS · AÉROPORT CDG</div>
-              <p className="text-gray-300 mt-2">Regarde le grand écran pour le palmarès 🏆</p>
-              <div className="text-4xl font-extrabold text-paid mt-4">{me ? me.pts : 100} pts</div>
-            </Center>
-          )}
+          {state.phase === "ended" && <EndView key="end" state={state} meIndex={meIndex} host={host} onSettle={() => hostAction("settle")} busy={busy} />}
         </AnimatePresence>
       </div>
 
-      {/* result overlay */}
-      <ResultOverlay myResult={myResult} station={station} points={me?.pts ?? 100} isCtrl={isCtrl} />
+      <ResultFlash state={state} meIndex={meIndex} />
     </main>
   );
 }
 
-function myResultActive(myResult: any, station: number) {
-  return myResult && myResult.station === station;
-}
-
-function Center({ children }: { children: React.ReactNode }) {
+function Lobby({ state, host, onStart, busy }: { state: Snap; host: string | null; onStart: () => void; busy: string }) {
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="text-center flex flex-col items-center justify-center py-10"
-    >
-      {children}
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col items-center gap-4 py-4">
+      <div className="riso text-cream text-3xl">Sur le quai…</div>
+      <div className="text-cream/70">{state.game.playerCount}/{state.maxPlayers} voyageurs • {state.game.numWagons} wagons • {state.game.numStations} stations</div>
+      <div className="flex flex-wrap gap-2 justify-center max-w-md">
+        {state.roster.map((r) => (
+          <div key={r.addr} className="flex flex-col items-center w-16">
+            <Passenger seed={r.nick} size={44} />
+            <span className="text-cream text-xs truncate w-full text-center">{r.nick}</span>
+          </div>
+        ))}
+      </div>
+      {host ? (
+        <button onClick={onStart} disabled={!!busy || state.game.playerCount < 2} className="btn bg-green text-ink text-2xl px-8 py-4 rounded-xl mt-2">
+          {busy ? "…" : "LANCER LE TRAIN"}
+        </button>
+      ) : (
+        <div className="riso text-yellow text-xl animate-wobble mt-2">En attente de l&apos;hôte…</div>
+      )}
     </motion.div>
   );
 }
 
-function RoleCard({ isCtrl, peek, setPeek }: { isCtrl: boolean; peek: boolean; setPeek: (b: boolean) => void }) {
-  return (
-    <div className="card-3d" onClick={() => setPeek(!peek)}>
-      <motion.div
-        animate={{ rotateY: peek ? 180 : 0 }}
-        transition={{ duration: 0.5 }}
-        style={{ transformStyle: "preserve-3d" }}
-        className="relative h-16 rounded-2xl cursor-pointer"
-      >
-        <div className="absolute inset-0 glass rounded-2xl flex items-center justify-center gap-2" style={{ backfaceVisibility: "hidden" }}>
-          <span className="text-lg font-bold">🎴 Ton rôle</span>
-          <span className="text-xs text-gray-400">(tape pour voir)</span>
-        </div>
-        <div
-          className={`absolute inset-0 rounded-2xl flex items-center justify-center font-extrabold text-xl ${
-            isCtrl ? "bg-amber text-black shadow-neonAmber" : "bg-rerb neon-blue"
-          }`}
-          style={{ backfaceVisibility: "hidden", transform: "rotateY(180deg)" }}
-        >
-          {isCtrl ? "🎩 CONTRÔLEUR 🤫 garde le secret" : "🚇 PASSAGER"}
-        </div>
-      </motion.div>
-    </div>
-  );
-}
-
-function PhaseBanner({ phase, endsAt, nowSec }: { phase: string; endsAt: number; nowSec: () => number }) {
-  const remaining = useCountdown(endsAt, nowSec);
+function PlayView({ state, meIndex, myWagon, onBoard, iAmController }: { state: Snap; meIndex: number; myWagon: number | null; onBoard: (w: number) => void; iAmController: boolean }) {
+  const remaining = useCountdown(state.phaseEndsAt, () => state.now);
   const secs = Math.ceil(remaining);
+  const tickRef = useRef(-1);
+  useEffect(() => { if (secs !== tickRef.current) { tickRef.current = secs; if (state.phase === "board" && secs <= 3 && secs > 0) playTick(secs === 1); } }, [secs, state.phase]);
+
+  const cb = state.currentBoarding;
+  const perWagon: number[][] = Array.from({ length: state.game.numWagons }, () => []);
+  if (cb) state.roster.forEach((_, i) => { const w = cb.wagons[i]; if (w >= 0) perWagon[w].push(i); });
+
   return (
-    <div className="text-center mb-3">
-      <div className={`led text-4xl ${secs <= 3 ? "text-fine" : ""}`}>{String(secs).padStart(2, "0")}s</div>
-      <div className="text-xs text-gray-400 uppercase tracking-widest">{phase === "commit" ? "choisis vite" : phase}</div>
-    </div>
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex-1 flex flex-col">
+      <div className="text-center mb-2">
+        <div className={`riso text-5xl ${secs <= 3 && state.phase === "board" ? "text-vermilion" : "text-cream"}`}>
+          {state.phase === "board" ? `${String(secs).padStart(2, "0")}s` : "CONTRÔLE…"}
+        </div>
+        <div className="text-cream/70 text-sm">
+          {state.phase === "board" ? (iAmController ? "Choisis le wagon à inspecter" : "Cache-toi dans un wagon !") : "Les portes s'ouvrent…"}
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2 flex-1 content-start">
+        {Array.from({ length: state.game.numWagons }).map((_, w) => {
+          const occ = perWagon[w];
+          const full = occ.length >= state.game.wagonCap;
+          const mine = myWagon === w;
+          return (
+            <button
+              key={w}
+              onClick={() => onBoard(w)}
+              disabled={state.phase !== "board" || (full && !mine)}
+              className={`relative rounded-2xl p-2 min-h-28 flex flex-col ${mine ? "bg-blue" : "bg-ink2"}`}
+              style={{ border: `3px solid ${mine ? "#F3E9D2" : full ? "#FF4E3A" : "#F3E9D2"}` }}
+            >
+              <div className="riso text-cream text-sm">VOITURE {w + 1} <span className="text-cream/60">{occ.length}/{state.game.wagonCap}</span></div>
+              <div className="flex flex-wrap gap-0.5 items-end justify-center flex-1 overflow-hidden">
+                {occ.slice(0, 6).map((i) => <Passenger key={i} seed={state.roster[i].nick} size={30} />)}
+              </div>
+              {full && !mine && <span className="absolute inset-0 flex items-center justify-center riso text-vermilion text-lg -rotate-6">COMPLET</span>}
+              {mine && <span className="absolute top-1 right-2 riso text-cream text-xs">TOI ✓</span>}
+            </button>
+          );
+        })}
+      </div>
+      <div className="text-center text-cream/60 text-xs mt-2">Station {state.station + 1}/{state.game.numStations} • {state.survivors} survivants</div>
+    </motion.div>
   );
 }
 
-function ResultOverlay({ myResult, station, points, isCtrl }: { myResult: any; station: number; points: number; isCtrl: boolean }) {
-  const show = myResult && myResult.station === station;
+function Spectator({ state }: { state: Snap }) {
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex-1 flex flex-col items-center justify-center text-center gap-3">
+      <div className="text-6xl opacity-60">👻</div>
+      <div className="riso text-cream text-3xl">Fantôme du RER</div>
+      <p className="text-cream/70">Tu as été éliminé. Regarde qui s&apos;en sort…</p>
+      <div className="card-dark rounded-xl px-4 py-2">
+        <div className="riso text-2xl text-vermilion">{Number(state.potMon).toFixed(3)} MON</div>
+        <div className="text-xs">pot • {state.survivors} survivants</div>
+      </div>
+    </motion.div>
+  );
+}
+
+function EndView({ state, meIndex, host, onSettle, busy }: { state: Snap; meIndex: number; host: string | null; onSettle: () => void; busy: string }) {
+  const settled = state.game.settled;
+  const survived = state.alive[meIndex];
+  const share = settled && state.survivorAddrs?.length ? Number(state.potMon) / state.survivorAddrs.length : 0;
+  return (
+    <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="flex-1 flex flex-col items-center justify-center text-center gap-4">
+      <div className="riso text-cream text-2xl">TERMINUS · CDG</div>
+      {survived ? (
+        <>
+          <div className="riso text-green text-6xl riso-offset">SURVIVANT !</div>
+          {settled && <div className="riso text-yellow text-4xl">+{share.toFixed(4)} MON</div>}
+        </>
+      ) : (
+        <div className="riso text-vermilion text-5xl">Éliminé</div>
+      )}
+      {!settled && host && (
+        <button onClick={onSettle} disabled={!!busy} className="btn bg-vermilion text-cream text-xl px-6 py-3 rounded-xl">
+          {busy ? "…" : "PARTAGER LE POT 💰"}
+        </button>
+      )}
+      {!settled && !host && <div className="text-cream/60">En attente du partage du pot…</div>}
+      {settled && <div className="text-cream/70">{state.survivorAddrs?.length} survivant(s) se partagent {Number(state.potMon).toFixed(3)} MON</div>}
+    </motion.div>
+  );
+}
+
+function ResultFlash({ state, meIndex }: { state: Snap; meIndex: number }) {
+  const lastSeen = useRef(-1);
+  const [show, setShow] = useState<null | "caught" | "safe">(null);
+  useEffect(() => {
+    const lr = state.lastReveal;
+    if (!lr || lr.station === lastSeen.current) return;
+    if (state.phase !== "reveal") return;
+    lastSeen.current = lr.station;
+    const caught = lr.caught.includes(meIndex) || lr.idleOut.includes(meIndex);
+    if (caught) { setShow("caught"); playEliminate(); if (navigator.vibrate) navigator.vibrate([120, 60, 120]); }
+    else if (state.alive[meIndex]) { setShow("safe"); playSurvive(); if (navigator.vibrate) navigator.vibrate(40); }
+    const t = setTimeout(() => setShow(null), 2600);
+    return () => clearTimeout(t);
+  }, [state.lastReveal?.station, state.phase]); // eslint-disable-line
   return (
     <AnimatePresence>
       {show && (
         <motion.div
-          key={`res-${station}`}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className={`fixed inset-0 z-40 flex flex-col items-center justify-center text-center p-8 ${
-            myResult.outcome === 3 ? "bg-fine" : myResult.outcome === 4 ? "bg-amber text-black" : myResult.outcome === 2 ? "bg-black" : "bg-paid text-black"
-          }`}
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          className={`fixed inset-0 z-50 flex flex-col items-center justify-center ${show === "caught" ? "bg-vermilion" : "bg-green"}`}
         >
-          {myResult.outcome === 3 && (
-            <motion.div initial={{ scale: 3, rotate: -20, opacity: 0 }} animate={{ scale: 1, rotate: -8, opacity: 1 }} transition={{ type: "spring", stiffness: 300 }}>
-              <div className="text-7xl font-black">CONTRÔLÉ !</div>
-              <div className="text-5xl font-black mt-2">−20</div>
+          {show === "caught" ? (
+            <motion.div initial={{ scale: 2, rotate: -12 }} animate={{ scale: 1, rotate: -6 }} className="text-center">
+              <Controleur size={120} />
+              <div className="riso text-cream text-6xl mt-2">CONTRÔLÉ !</div>
             </motion.div>
+          ) : (
+            <div className="text-center">
+              <Passenger seed={getNick()} size={120} />
+              <div className="riso text-ink text-6xl mt-2">SAUVÉ 😮‍💨</div>
+            </div>
           )}
-          {myResult.outcome === 1 && <div className="text-6xl font-black">Ticket OK ✅<div className="text-3xl mt-2">−2</div></div>}
-          {myResult.outcome === 2 && <div className="text-6xl font-black text-paid">Tranquille 😎<div className="text-2xl mt-2 text-white">fraude réussie</div></div>}
-          {myResult.outcome === 4 && <div className="text-6xl font-black">Contrôle effectué 🕵️</div>}
-          {(myResult.outcome === 0 || myResult.outcome === undefined) && <div className="text-5xl font-black">Station passée</div>}
-          <div className="mt-8 text-2xl font-bold opacity-90">{points} points</div>
         </motion.div>
       )}
     </AnimatePresence>

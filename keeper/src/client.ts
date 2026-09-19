@@ -31,10 +31,17 @@ export async function waitUntil(unixSec: number, label = "") {
   }
 }
 
-/** Latest block timestamp (the chain's clock). */
+/** Latest block timestamp (the chain's clock). Retries on transient RPC errors. */
 export async function chainNow(): Promise<number> {
-  const b = await publicClient.getBlock({ blockTag: "latest" });
-  return Number(b.timestamp);
+  for (let i = 0; ; i++) {
+    try {
+      const b = await publicClient.getBlock({ blockTag: "latest" });
+      return Number(b.timestamp);
+    } catch (e) {
+      if (i >= 5) throw e;
+      await sleep(500 * (i + 1));
+    }
+  }
 }
 
 /**
@@ -115,7 +122,14 @@ export async function writeWithRetry(
 }
 
 export async function readContract(address: Address, functionName: string, args: any[] = []) {
-  return publicClient.readContract({ ...contractCfg(address), functionName, args });
+  for (let i = 0; ; i++) {
+    try {
+      return await publicClient.readContract({ ...contractCfg(address), functionName, args });
+    } catch (e) {
+      if (i >= 5) throw e;
+      await sleep(500 * (i + 1));
+    }
+  }
 }
 
 export async function ensureFunded(gmKey: Hex, addr: Address, minMon: string, topUpMon: string) {
