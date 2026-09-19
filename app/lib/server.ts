@@ -35,6 +35,9 @@ export function isHost(gameId: string, token: string): boolean {
   return token === ADMIN_SECRET || token === hostTokenFor(gameId);
 }
 
+// remembers the settle (pot payout) tx per game so any client can link it
+export const settleTxs = new Map<string, string>();
+
 export const serverChain = defineChain({
   id: CHAIN_ID,
   name: "Monad Testnet",

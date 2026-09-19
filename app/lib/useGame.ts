@@ -35,6 +35,7 @@ export type Snap = {
   finalRoles: number[] | null;
   survivorAddrs: string[] | null;
   decided?: boolean;
+  settleTx?: string | null;
   potMon: string;
 };
 

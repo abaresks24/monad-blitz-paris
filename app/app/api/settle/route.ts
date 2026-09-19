@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyMessage, type Address, type Hex } from "viem";
-import { serverPublic, gmWrite, cfg, CONTRACT, MASTER_SECRET, ADMIN_SECRET } from "@/lib/server";
+import { serverPublic, gmWrite, cfg, CONTRACT, MASTER_SECRET, ADMIN_SECRET, settleTxs } from "@/lib/server";
 import { assignRoles, roleSaltFor } from "@/lib/game";
 
 export const dynamic = "force-dynamic";
@@ -28,6 +28,7 @@ export async function POST(req: NextRequest) {
     const salts = players.map((p) => roleSaltFor(gid, p, MASTER_SECRET));
     const hash = await gmWrite("settle", [gid, roles, salts]);
     await serverPublic.waitForTransactionReceipt({ hash });
+    settleTxs.set(String(gameId), hash);
     return NextResponse.json({ ok: true, hash });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.shortMessage ?? e?.message ?? "settle failed" });

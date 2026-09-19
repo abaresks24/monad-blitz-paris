@@ -35,6 +35,13 @@ export function getHostToken(gameId: string): string | null {
   return typeof window !== "undefined" ? localStorage.getItem(`rerb_host_${gameId}`) : null;
 }
 
+export function saveJoinTx(gameId: string, hash: string) {
+  localStorage.setItem(`rerb_jointx_${gameId}`, hash);
+}
+export function getJoinTx(gameId: string): string | null {
+  return typeof window !== "undefined" ? localStorage.getItem(`rerb_jointx_${gameId}`) : null;
+}
+
 // cached role for this game (fetched from /api/myrole after start)
 export function saveRole(gameId: string, role: number, controllers?: string[]) {
   localStorage.setItem(`rerb_role_${gameId}`, JSON.stringify({ role, controllers: controllers ?? [] }));

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { formatEther, type Address } from "viem";
-import { serverPublic, cfg, jsonSafe, CONTRACT, MASTER_SECRET } from "@/lib/server";
+import { serverPublic, cfg, jsonSafe, CONTRACT, MASTER_SECRET, settleTxs } from "@/lib/server";
 import { assignRoles } from "@/lib/game";
 import { simulate, type BoardRec } from "@/lib/sim";
 
@@ -143,6 +143,7 @@ export async function GET(req: NextRequest) {
       finalRoles, // null until settled
       survivorAddrs,
       decided,
+      settleTx: settleTxs.get(String(gid)) ?? null,
       potMon: formatEther(BigInt(game.pot)),
     });
     cache.set(gameId, { at: Date.now(), data });

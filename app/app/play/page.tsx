@@ -2,7 +2,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { parseEther, type Hex } from "viem";
-import { getBurner, getNick, saveNick, markJoined, hasJoined, saveRole, getRole } from "@/lib/burner";
+import { getBurner, getNick, saveNick, markJoined, hasJoined, saveRole, getRole, saveJoinTx, getJoinTx } from "@/lib/burner";
+
+const EXPLORER = "https://testnet.monadexplorer.com/tx/";
 import { walletFor, publicClient } from "@/lib/chain";
 
 // Fund the burner, then WAIT until the balance is actually visible on-chain (Monad nodes lag a
@@ -94,7 +96,8 @@ function Entry({ burner, state, startCreate }: { burner: { pk: Hex; address: `0x
       const fee = BigInt(g.entryFee || "1000000000000000");
       await ensureFunded(burner.address, fee + parseEther("0.03"));
       setBusy("Embarquement…");
-      await sendJoin(burner.pk, BigInt(gid), nick.trim(), fee);
+      const jh = await sendJoin(burner.pk, BigInt(gid), nick.trim(), fee);
+      if (jh) saveJoinTx(gid, jh);
       markJoined(gid);
     } catch (e: any) { setErr(e?.shortMessage ?? e?.message ?? "échec"); } finally { setBusy(""); }
   }
@@ -109,7 +112,8 @@ function Entry({ burner, state, startCreate }: { burner: { pk: Hex; address: `0x
       setBusy("Création de la partie…");
       const newId = await sendCreate(burner.pk, { numWagons: wagons, numControllers: controllers, numStations: stations, boardDuration: 20, fee });
       setBusy("Embarquement…");
-      await sendJoin(burner.pk, BigInt(newId), nick.trim(), fee);
+      const jh = await sendJoin(burner.pk, BigInt(newId), nick.trim(), fee);
+      if (jh) saveJoinTx(newId, jh);
       markJoined(newId);
       window.location.href = `/play?g=${newId}`; // pin the room to this game
       return;
@@ -429,6 +433,20 @@ function EndView({ state, meIndex, isCreator, onSettle, busy }: { state: Snap; m
         </div>
       </div>
       {settled && <div className="text-cream/70 text-sm">{state.survivorAddrs?.length}/{state.game.playerCount} survivant(s) • {Number(state.potMon).toFixed(3)} MON de pot partagés</div>}
+
+      {/* transaction links */}
+      <div className="flex flex-col gap-1 text-sm">
+        {getJoinTx(String(state.gameId)) && (
+          <a href={`${EXPLORER}${getJoinTx(String(state.gameId))}`} target="_blank" rel="noreferrer" className="text-blue underline">
+            Ta transaction de mise ↗
+          </a>
+        )}
+        {settled && survived && state.settleTx && (
+          <a href={`${EXPLORER}${state.settleTx}`} target="_blank" rel="noreferrer" className="text-green underline">
+            Ta transaction de gain ↗
+          </a>
+        )}
+      </div>
 
       <div className="flex flex-col gap-2 w-full max-w-xs mt-2">
         <a href="/play?new=1" className="btn bg-blue text-cream text-xl px-8 py-3 rounded-xl">NOUVELLE PARTIE</a>
