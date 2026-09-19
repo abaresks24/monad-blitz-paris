@@ -200,7 +200,6 @@ contract RERBSurvival {
         Game storage g = games[gameId];
         if (!g.started) revert NotStarted();
         if (g.settled) revert AlreadySettled();
-        if (block.timestamp < _gameEnd(g)) revert GameNotOver();
 
         address[] storage pl = _players[gameId];
         uint256 n = pl.length;
@@ -213,12 +212,21 @@ contract RERBSurvival {
             _player[gameId][pl[i]].role = roles[i];
         }
 
-        // recompute eliminations
+        // only stations whose boarding window has closed are "played" (lets the game settle
+        // as soon as a side is wiped, without waiting for the full schedule)
+        uint8 played;
+        for (uint8 s = 0; s < g.numStations; ++s) {
+            (, uint256 bEnd) = _boardWindow(g, s);
+            if (block.timestamp >= bEnd) played += 1;
+        }
+
+        // recompute eliminations, stopping the instant one side is wiped out
         bool[] memory alive = new bool[](n);
         uint8[] memory strikes = new uint8[](n);
         for (uint256 i = 0; i < n; ++i) alive[i] = true;
 
-        for (uint8 s = 0; s < g.numStations; ++s) {
+        bool decided = false;
+        for (uint8 s = 0; s < played; ++s) {
             uint8[] memory wagonOf = new uint8[](n);
             uint16[] memory ctrlIn = new uint16[](g.numWagons);
             uint16[] memory fraudIn = new uint16[](g.numWagons);
@@ -235,7 +243,7 @@ contract RERBSurvival {
             for (uint256 i = 0; i < n; ++i) {
                 if (alive[i] && roles[i] != Role.CONTROLEUR && ctrlIn[wagonOf[i]] > 0) alive[i] = false;
             }
-            // idle-controller rule
+            // idle-controller rule (2 lonely stations in a row)
             for (uint256 i = 0; i < n; ++i) {
                 if (alive[i] && roles[i] == Role.CONTROLEUR) {
                     if (fraudIn[wagonOf[i]] == 0) {
@@ -246,7 +254,22 @@ contract RERBSurvival {
                     }
                 }
             }
+            // stop if one side has been wiped out — the survivors are the winners
+            uint256 aliveCtrl;
+            uint256 aliveFraud;
+            for (uint256 i = 0; i < n; ++i) {
+                if (!alive[i]) continue;
+                if (roles[i] == Role.CONTROLEUR) aliveCtrl += 1;
+                else aliveFraud += 1;
+            }
+            if (aliveCtrl == 0 || aliveFraud == 0) {
+                decided = true;
+                break;
+            }
         }
+
+        // must be either fully played out, or decided (one side eliminated)
+        if (!decided && played < g.numStations) revert GameNotOver();
 
         // tally survivors
         uint256 ns;

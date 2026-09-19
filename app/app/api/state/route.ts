@@ -70,7 +70,7 @@ export async function GET(req: NextRequest) {
     const sd = game.stationDuration;
     const station = Math.min(Math.floor((now - game.startedAt) / sd), game.numStations);
     const into = now - game.startedAt - station * sd;
-    const phase = station >= game.numStations ? "ended" : into < game.boardDuration ? "board" : "reveal";
+    let phase = station >= game.numStations ? "ended" : into < game.boardDuration ? "board" : "reveal";
     const phaseEndsAt =
       station >= game.numStations
         ? game.gameEnd
@@ -93,7 +93,10 @@ export async function GET(req: NextRequest) {
     }
     const sim = revealed > 0 ? simulate(gid, game.numWagons, revealed, addrs, roles, boarding) : null;
     const alive = sim ? sim.alive : addrs.map(() => true);
-    const lastReveal = sim && revealed > 0 ? sim.stations[revealed - 1] : null;
+    const lastReveal = sim && sim.stations.length > 0 ? sim.stations[sim.stations.length - 1] : null;
+    // one side wiped out → the game is over, even if stations remain on the schedule
+    const decided = !!sim?.decided;
+    if (decided) phase = "ended";
 
     // live boarding fill for the CURRENT board station (public — this is how the train visibly fills)
     let currentBoarding: { wagons: number[]; counts: number[] } | null = null;
@@ -128,7 +131,7 @@ export async function GET(req: NextRequest) {
       revealed,
       lastReveal: lastReveal
         ? {
-            station: revealed - 1,
+            station: sim ? sim.stations.length - 1 : revealed - 1,
             controllerWagons: lastReveal.controllerWagons,
             caught: lastReveal.caught,
             idleOut: lastReveal.idleOut,
@@ -139,6 +142,7 @@ export async function GET(req: NextRequest) {
       elimOnChain,
       finalRoles, // null until settled
       survivorAddrs,
+      decided,
       potMon: formatEther(BigInt(game.pot)),
     });
     cache.set(gameId, { at: Date.now(), data });

@@ -16,6 +16,8 @@ export type SimResult = {
   alive: boolean[];
   eliminatedAtStation: number[];
   stations: { wagonOf: number[]; controllerWagons: number[]; caught: number[]; idleOut: number[] }[];
+  decided: boolean; // one side wiped out → game over
+  decidedAtStation: number; // -1 if not decided
 };
 
 /** Deterministic elimination sim, identical to RERBSurvival.settle(). Drives the live reveal. */
@@ -32,6 +34,8 @@ export function simulate(
   const eliminatedAtStation = new Array(n).fill(-1);
   const strikes = new Array(n).fill(0);
   const stations: SimResult["stations"] = [];
+  let decided = false;
+  let decidedAtStation = -1;
 
   for (let s = 0; s < numStations; s++) {
     const wagonOf = new Array(n).fill(-1);
@@ -70,6 +74,19 @@ export function simulate(
     const controllerWagons: number[] = [];
     for (let w = 0; w < numWagons; w++) if (ctrlIn[w] > 0) controllerWagons.push(w);
     stations.push({ wagonOf, controllerWagons, caught, idleOut });
+
+    // stop once one side is wiped out — game decided
+    let aliveCtrl = 0, aliveFraud = 0;
+    for (let i = 0; i < n; i++) {
+      if (!alive[i]) continue;
+      if (roles[i] === Role.CONTROLEUR) aliveCtrl++;
+      else aliveFraud++;
+    }
+    if (aliveCtrl === 0 || aliveFraud === 0) {
+      decided = true;
+      decidedAtStation = s;
+      break;
+    }
   }
-  return { alive, eliminatedAtStation, stations };
+  return { alive, eliminatedAtStation, stations, decided, decidedAtStation };
 }

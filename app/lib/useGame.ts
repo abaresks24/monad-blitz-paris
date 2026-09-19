@@ -34,6 +34,7 @@ export type Snap = {
   elimOnChain: boolean[];
   finalRoles: number[] | null;
   survivorAddrs: string[] | null;
+  decided?: boolean;
   potMon: string;
 };
 

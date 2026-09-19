@@ -262,6 +262,35 @@ contract RERBSurvivalTest is Test {
         assertEq(address(game).balance, 0, "pot paid out");
     }
 
+    // -------- game ends early: all fraudeurs caught -> controllers WIN (not idle-eliminated)
+    function test_ControllersWinWhenAllFraudeursCaught() public {
+        uint256 gid = game.createGame(2, 5, 1, 3, BOARD, FEE); // 3 stations
+        address c = _mk(1); // controleur, wagon0
+        address a = _mk(2); // fraudeur -> wagon0 (caught st0)
+        address b = _mk(3); // fraudeur -> wagon0 (caught st0)
+        _join(gid, c, "c");
+        _join(gid, a, "a");
+        _join(gid, b, "b");
+        address[] memory pl = game.getPlayers(gid);
+        RERBSurvival.Role[] memory roles = new RERBSurvival.Role[](3);
+        roles[0] = RERBSurvival.Role.CONTROLEUR;
+        roles[1] = RERBSurvival.Role.FRAUDEUR;
+        roles[2] = RERBSurvival.Role.FRAUDEUR;
+        _start(gid, pl, roles);
+
+        _board(gid, 0, c, 0);
+        _board(gid, 0, a, 0);
+        _board(gid, 0, b, 0);
+        // stations 1 & 2: nobody left to catch — without early-stop the lone controller would be
+        // idle-eliminated. With early-stop the game is decided at station 0.
+        _settle(gid, pl, roles);
+
+        assertFalse(game.eliminated(gid, c), "controller wins when all fraudeurs are caught");
+        assertTrue(game.eliminated(gid, a));
+        assertTrue(game.eliminated(gid, b));
+        assertEq(c.balance, 10 ether - FEE + 3 * FEE, "sole controller takes the whole pot");
+    }
+
     // -------- registration cap = 3 x wagons
     function test_RevertWhen_TooManyPlayers() public {
         uint256 gid = game.createGame(2, 5, 1, 1, BOARD, FEE); // cap = 6
