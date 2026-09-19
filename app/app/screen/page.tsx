@@ -9,8 +9,13 @@ import { Confetti } from "@/components/Confetti";
 import { ANNOUNCEMENTS, pickAnnouncement } from "@/lib/announcements";
 import { startMusic, stopMusic, setSfxEnabled, speak, playDoors, playTick } from "@/lib/sound";
 
+function urlGameId(): string | number {
+  if (typeof window === "undefined") return 0;
+  return new URLSearchParams(window.location.search).get("g") ?? 0;
+}
+
 export default function Screen() {
-  const { state, connected } = useGame(0, 400);
+  const { state, connected } = useGame(urlGameId(), 400);
   const [on, setOn] = useState(false);
   const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
 
@@ -52,8 +57,9 @@ function Lobby({ state, baseUrl }: { state: Snap; baseUrl: string }) {
         <div className="text-cream/70 text-xl">{labels[0]} → {labels[labels.length - 1]} · mise {(Number(state.game.entryFee) / 1e18).toFixed(4)} MON</div>
       </div>
       <div className="flex flex-col items-center gap-3">
-        <div className="card p-4 rounded-2xl"><QRCode text={`${baseUrl}/play`} size={300} /></div>
+        <div className="card p-4 rounded-2xl"><QRCode text={`${baseUrl}/play?g=${state.gameId}`} size={300} /></div>
         <div className="riso text-cream text-3xl">SCANNEZ POUR JOUER</div>
+        <div className="text-cream/60 text-lg">partie #{state.gameId}</div>
       </div>
       <div className="w-80">
         <div className="riso text-yellow text-3xl mb-3">{state.game.playerCount} À BORD</div>

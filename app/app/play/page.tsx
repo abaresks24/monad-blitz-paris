@@ -10,8 +10,13 @@ import { sendJoin, sendBoard } from "@/lib/tx";
 import { Passenger, Controleur, TicketMark } from "@/components/art";
 import { startMusic, stopMusic, isMusicOn, setSfxEnabled, playBoard, playEliminate, playSurvive, playTick } from "@/lib/sound";
 
+function urlGameId(): string | number {
+  if (typeof window === "undefined") return 0;
+  return new URLSearchParams(window.location.search).get("g") ?? 0;
+}
+
 export default function Play() {
-  const { state, connected } = useGame(0, 600);
+  const { state, connected } = useGame(urlGameId(), 600);
   const [burner, setBurner] = useState<{ pk: Hex; address: `0x${string}` } | null>(null);
   useEffect(() => setBurner(getBurner()), []);
 
@@ -86,6 +91,9 @@ function Entry({ burner, state }: { burner: { pk: Hex; address: `0x${string}` };
       if (!j.ok) throw new Error(j.error);
       saveHostToken(j.gameId, j.hostToken);
       await fundAndJoin(j.gameId, parseEther(j.entryFee));
+      // pin everyone to THIS game (screen QR + refresh-safe)
+      window.location.href = `/play?g=${j.gameId}`;
+      return;
     } catch (e: any) { setErr(e?.shortMessage ?? e?.message ?? "échec"); } finally { setBusy(""); }
   }
 
@@ -243,9 +251,12 @@ function Lobby({ state, host, onStart, busy }: { state: Snap; host: string | nul
         ))}
       </div>
       {host ? (
-        <button onClick={onStart} disabled={!!busy || state.game.playerCount < 2} className="btn bg-green text-ink text-2xl px-8 py-4 rounded-xl mt-2">
-          {busy ? "…" : "LANCER LE TRAIN"}
-        </button>
+        <div className="flex flex-col items-center gap-2 mt-2">
+          <a href={`/screen?g=${state.gameId}`} target="_blank" rel="noreferrer" className="btn bg-blue text-cream text-sm px-4 py-2 rounded-lg">Ouvrir le grand écran ↗</a>
+          <button onClick={onStart} disabled={!!busy || state.game.playerCount < 2} className="btn bg-green text-ink text-2xl px-8 py-4 rounded-xl">
+            {busy ? "…" : "LANCER LE TRAIN"}
+          </button>
+        </div>
       ) : (
         <div className="riso text-yellow text-xl animate-wobble mt-2">En attente de l&apos;hôte…</div>
       )}
