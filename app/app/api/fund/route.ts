@@ -13,10 +13,10 @@ export async function POST(req: NextRequest) {
     const bal = (await serverPublic.getBalance({ address: address as Address })) as bigint;
     const target = parseEther(BURNER_FUND_MON);
     if (bal < target / 2n) {
+      // fire the funding tx but DON'T block on the receipt — the client polls its own balance.
+      // keeps the join rush fast when 30 players fund at once.
       const hash = await gmSendValue(address as Address, target);
-      await serverPublic.waitForTransactionReceipt({ hash });
-      const nb = await serverPublic.getBalance({ address: address as Address });
-      return NextResponse.json({ ok: true, funded: true, balance: formatEther(nb) });
+      return NextResponse.json({ ok: true, funded: true, hash });
     }
     return NextResponse.json({ ok: true, funded: false, balance: formatEther(bal) });
   } catch (e: any) {

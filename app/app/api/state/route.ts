@@ -9,7 +9,9 @@ export const runtime = "nodejs";
 
 type Cached = { at: number; data: any };
 const cache = new Map<string, Cached>();
-const TTL = 400;
+// 30 phones share this cache, so the RPC sees ~1 read/sec regardless of crowd size.
+// Countdowns are client-side (anchored clock), so a slightly longer TTL costs nothing visible.
+const TTL = 800;
 
 async function read(fn: string, args: any[] = []) {
   return serverPublic.readContract({ ...cfg(), functionName: fn, args });

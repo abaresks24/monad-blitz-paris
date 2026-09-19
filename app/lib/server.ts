@@ -16,7 +16,7 @@ const RPC_URLS = (process.env.MONAD_RPC_URLS ?? process.env.MONAD_RPC_URL ?? DEF
   .map((s) => s.trim())
   .filter(Boolean);
 const RPC_URL = RPC_URLS[0];
-const poolTransport = () => fallback(RPC_URLS.map((u) => http(u, { retryCount: 2 })));
+const poolTransport = () => fallback(RPC_URLS.map((u) => http(u, { retryCount: 2, batch: true })));
 const CHAIN_ID = Number(process.env.MONAD_CHAIN_ID ?? process.env.NEXT_PUBLIC_CHAIN_ID ?? 10143);
 export const CONTRACT = (process.env.CONTRACT_ADDRESS ?? process.env.NEXT_PUBLIC_CONTRACT_ADDRESS ?? "") as Address;
 export const MASTER_SECRET = process.env.MASTER_SECRET ?? "blitz-demo-secret";

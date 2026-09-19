@@ -209,14 +209,15 @@ function Game({ burner, state, meIndex, nowSec }: { burner: { pk: Hex; address: 
 
   async function board(w: number) {
     if (!alive || state.phase !== "board") return;
-    const prev = myWagon;
+    // keep the player's choice on screen no matter what; retry in the background
     setMyWagon(w); playBoard(); setErr("");
     try {
       await sendBoard(burner.pk, BigInt(gid), state.station, w);
+      setErr("");
     } catch (e: any) {
-      setMyWagon(prev); // revert optimistic pick
       const m = String(e?.shortMessage ?? e?.message ?? "");
-      setErr(/NotBoardingWindow/.test(m) ? "trop tard pour ce wagon" : "réseau lent, retape le wagon");
+      if (/NotBoardingWindow/.test(m)) setErr("trop tard pour changer de voiture");
+      else setErr("envoi en cours… (reste sur ta voiture)");
     }
   }
 
@@ -356,17 +357,18 @@ function PlayView({ state, meIndex, myWagon, onBoard, iAmController, nowSec }: {
         {Array.from({ length: state.game.numWagons }).map((_, w) => {
           const full = counts[w] >= state.game.wagonCap;
           const mine = myWagon === w;
+          const confirmed = !!state.currentBoarding && state.currentBoarding.wagons[meIndex] === w;
           const big = state.game.numWagons <= 6;
           return (
             <button
               key={w}
               onClick={() => onBoard(w)}
               disabled={state.phase !== "board" || (full && !mine)}
-              className={`relative rounded-2xl flex flex-col items-center justify-center active:scale-95 transition ${big ? "min-h-24 p-3" : "min-h-16 p-2"} ${mine ? "bg-blue" : "bg-ink2"}`}
-              style={{ border: `3px solid ${mine ? "#F3E9D2" : full ? "#FF4E3A" : "#F3E9D2"}` }}
+              className={`relative rounded-2xl flex flex-col items-center justify-center active:scale-90 transition ${big ? "min-h-24 p-3" : "min-h-16 p-2"} ${mine ? "bg-blue" : "bg-ink2"}`}
+              style={{ border: `4px solid ${mine ? "#FFC53D" : full ? "#FF4E3A" : "#F3E9D2"}` }}
             >
-              <div className={`riso text-cream ${big ? "text-2xl" : "text-lg"} leading-none`}>V{w + 1}</div>
-              {mine && <div className="riso text-cream text-xs mt-1">TU ES ICI</div>}
+              <div className={`riso text-cream ${big ? "text-3xl" : "text-lg"} leading-none`}>V{w + 1}</div>
+              {mine && <div className="riso text-yellow text-xs mt-1">{confirmed ? "✓ VERROUILLÉ" : "sélection…"}</div>}
               {full && !mine && <span className="absolute inset-0 flex items-center justify-center riso text-vermilion text-sm -rotate-6">COMPLET</span>}
             </button>
           );
