@@ -41,7 +41,7 @@ export default function Play() {
   const amIn = meIndex >= 0 && hasJoined(gid);
   const wantNew = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("new") === "1";
 
-  if (wantNew || !amIn) return <Entry burner={burner} state={state} />;
+  if (wantNew || !amIn) return <Entry burner={burner} state={state} startCreate={wantNew} />;
   return <Game burner={burner} state={state} meIndex={meIndex} nowSec={nowSec} />;
 }
 
@@ -69,11 +69,11 @@ function MuteButton() {
 }
 
 /* ------------------------------------------------------------------ ENTRY (create / join) */
-function Entry({ burner, state }: { burner: { pk: Hex; address: `0x${string}` }; state: Snap }) {
+function Entry({ burner, state, startCreate }: { burner: { pk: Hex; address: `0x${string}` }; state: Snap; startCreate?: boolean }) {
   const [nick, setNick] = useState(getNick());
   const [busy, setBusy] = useState("");
   const [err, setErr] = useState("");
-  const [mode, setMode] = useState<"pick" | "create">("pick");
+  const [mode, setMode] = useState<"pick" | "create">(startCreate ? "create" : "pick");
   const [wagons, setWagons] = useState(5);
   const [controllers, setControllers] = useState(2);
   const [stations, setStations] = useState(4);

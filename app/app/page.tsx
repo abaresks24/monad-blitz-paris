@@ -33,8 +33,8 @@ export default function Home() {
       </div>
 
       <div className="flex flex-wrap gap-4 justify-center">
-        <Link href="/play" className="btn bg-vermilion text-cream text-2xl px-10 py-4 rounded-xl">
-          Jouer
+        <Link href="/play?new=1" className="btn bg-vermilion text-cream text-2xl px-10 py-4 rounded-xl">
+          Créer une partie
         </Link>
         <Link href="/screen" className="btn bg-cream text-ink text-2xl px-10 py-4 rounded-xl">
           Grand écran
