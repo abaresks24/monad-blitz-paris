@@ -51,7 +51,10 @@ export function useGame(gameId: string | number = 0, intervalMs = 500) {
         const j = await r.json();
         if (!alive) return;
         if (j.ok) {
-          skew.current = j.now - Date.now() / 1000;
+          // Anchor the chain/client clock offset ONCE, and only re-sync on large drift.
+          // Recomputing it every poll makes the countdown jitter ("timer restarts / stuck at 8s").
+          const newSkew = j.now - Date.now() / 1000;
+          if (skew.current === 0 || Math.abs(newSkew - skew.current) > 2.5) skew.current = newSkew;
           setState(j);
           setConnected(true);
         } else setConnected(false);

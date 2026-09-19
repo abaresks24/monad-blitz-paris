@@ -206,8 +206,15 @@ function Game({ burner, state, meIndex, nowSec }: { burner: { pk: Hex; address: 
 
   async function board(w: number) {
     if (!alive || state.phase !== "board") return;
-    setMyWagon(w); playBoard();
-    try { await sendBoard(burner.pk, BigInt(gid), state.station, w); } catch {}
+    const prev = myWagon;
+    setMyWagon(w); playBoard(); setErr("");
+    try {
+      await sendBoard(burner.pk, BigInt(gid), state.station, w);
+    } catch (e: any) {
+      setMyWagon(prev); // revert optimistic pick
+      const m = String(e?.shortMessage ?? e?.message ?? "");
+      setErr(/NotBoardingWindow/.test(m) ? "trop tard pour ce wagon" : "réseau lent, retape le wagon");
+    }
   }
 
   // creator starts the game: fetch commitments from the server (hashes only), then startGame from own wallet
@@ -266,6 +273,7 @@ function Game({ burner, state, meIndex, nowSec }: { burner: { pk: Hex; address: 
       </div>
 
       <ResultFlash state={state} meIndex={meIndex} />
+      {err && <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[60] card px-4 py-2 rounded-xl text-vermilion font-bold text-sm">{err}</div>}
     </main>
   );
 }

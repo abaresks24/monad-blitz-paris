@@ -1,6 +1,6 @@
 {
   "chainId": 10143,
-  "contract": "0xd27BA0B5D62f04516a9673Aa5E8cC231c887Bc5b",
+  "contract": "0xfb3083aA1F8FF8dbF2B5e603ff31bC361f3389Ca",
   "contractName": "RERBSurvival",
   "gameMaster": "0x2a9d3d608580df871E86eE1C161f1b5191c1c7Aa",
   "rpcPool": [
@@ -8,6 +8,6 @@
     "https://10143.rpc.thirdweb.com",
     "https://rpc.ankr.com/monad_testnet"
   ],
-  "explorer": "https://testnet.monadexplorer.com/address/0xd27BA0B5D62f04516a9673Aa5E8cC231c887Bc5b",
+  "explorer": "https://testnet.monadexplorer.com/address/0xfb3083aA1F8FF8dbF2B5e603ff31bC361f3389Ca",
   "app": "https://monad-blitz-paris.vercel.app"
 }

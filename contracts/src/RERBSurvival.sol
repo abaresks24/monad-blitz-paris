@@ -52,7 +52,7 @@ contract RERBSurvival {
     uint8 public constant MAX_WAGONS = 20;
     uint8 public constant MAX_STATIONS = 10;
     uint8 public constant MAX_CAP = 20;
-    uint32 public constant REVEAL_BUFFER = 6; // seconds of departure/reveal animation per station
+    uint32 public constant REVEAL_BUFFER = 10; // seconds of reveal/elimination before the next station
 
     // ---------------------------------------------------------------- storage
     uint256 public gameCount;
