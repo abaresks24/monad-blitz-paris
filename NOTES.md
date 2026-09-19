@@ -35,8 +35,31 @@ which is the real keeper strategy to dodge single-account nonce serialization.
 - If not, fallbacks in order: (a) more sender keys, (b) longer commit window (config), (c) fewer bots.
 
 ### RESULT
-> _Pending: requires a funded GM private key in `.env` (MON from blitz.devnads.com).
-> Run `cd keeper && npm i && npm run probe`. Result will be pasted here._
+**On real Monad Testnet: PENDING a funded GM key.** Run `cd keeper && npm run probe -- --n 20`
+and paste the verdict here. This is the only step that strictly needs the key before the demo.
+
+**Proxy evidence (local anvil, 1 s blocks — mimics Monad's ~1 s cadence):** two full games ran
+clean end-to-end — **20 bots × 4 stations, 20/20 commit and 20/20 reveal every station**, plus a
+mixed human+bot live game through the real app. All commits/reveals landed inside the windows once
+phase transitions were gated on the **chain clock** (not the local wall-clock — see below). Since
+Monad targets sub-second blocks (faster than anvil here), a 12 s commit / 5 s reveal window has
+comfortable headroom for 20+ passengers. **Verdict: 20 s stations are feasible; proceed.**
+Recommended: use an Alchemy Monad RPC for the demo to lift the 25 rps public-RPC limit when ~30
+phones + the screen are polling.
+
+### Gotcha found & fixed (important)
+Phase transitions MUST be gated on the **chain's latest block timestamp**, not `Date.now()`.
+Under drift (anvil `--block-time`, or a busy RPC) the local clock runs ahead of block time, causing
+`resolveStation`→`RevealWindowNotOver` and late reveals→`NotInRevealWindow`. `keeper/src/client.ts:waitUntilChain`
+polls block time and both the keeper and simulate use it. The web clients measure server/chain skew
+in `useGame` and count down against that.
+
+## M5 — Rehearsal
+- 4 stations × (12s commit + 5s reveal + 3s buffer) = **80 s of game** + ~a few s setup → fits the
+  "~90 s for 4 stations" target. Solo mode = keeper bots only.
+- Verified: `/api/admin` create, signed `/api/join` (fund+register), `/api/state` polling (dots +
+  results), keeper bot driving, `resolveStation`, `finishGame` with a **human role reconstructed
+  from the shared secret** (no BadRoleProof) → roles revealed correctly.
 
 ## Design decisions log
 - `roleCommit = keccak256(abi.encode(player, role, roleSalt, gameId))`.
