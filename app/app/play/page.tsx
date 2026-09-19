@@ -2,11 +2,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { parseEther, type Hex } from "viem";
-import { getBurner, getNick, saveNick, markJoined, hasJoined, saveHostToken, getHostToken, saveRole, getRole } from "@/lib/burner";
+import { getBurner, getNick, saveNick, markJoined, hasJoined, saveRole, getRole } from "@/lib/burner";
 import { walletFor } from "@/lib/chain";
 import { Role } from "@/lib/game";
 import { useGame, useCountdown, type Snap } from "@/lib/useGame";
-import { sendJoin, sendBoard } from "@/lib/tx";
+import { sendCreate, sendJoin, sendStart, sendBoard } from "@/lib/tx";
 import { Passenger, Controleur, TicketMark } from "@/components/art";
 import { startMusic, stopMusic, isMusicOn, setSfxEnabled, playBoard, playEliminate, playSurvive, playTick } from "@/lib/sound";
 
@@ -84,15 +84,17 @@ function Entry({ burner, state }: { burner: { pk: Hex; address: `0x${string}` };
 
   async function doCreate() {
     setErr(""); if (!nick.trim()) return setErr("Choisis un pseudo");
-    setBusy("Création…"); saveNick(nick.trim()); startMusic(); setSfxEnabled(true);
+    setBusy("Financement du wallet…"); saveNick(nick.trim()); startMusic(); setSfxEnabled(true);
     try {
-      const r = await fetch("/api/create", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ numWagons: wagons, numControllers: controllers, numStations: stations }) });
-      const j = await r.json();
-      if (!j.ok) throw new Error(j.error);
-      saveHostToken(j.gameId, j.hostToken);
-      await fundAndJoin(j.gameId, parseEther(j.entryFee));
-      // pin everyone to THIS game (screen QR + refresh-safe)
-      window.location.href = `/play?g=${j.gameId}`;
+      const fee = BigInt(g.entryFee || "1000000000000000"); // 0.001 MON default
+      // fund the burner so IT can create + join (the player is the on-chain creator)
+      await fetch("/api/fund", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ address: burner.address }) });
+      setBusy("Création de la partie…");
+      const newId = await sendCreate(burner.pk, { numWagons: wagons, numControllers: controllers, numStations: stations, boardDuration: 20, fee });
+      setBusy("Embarquement…");
+      await sendJoin(burner.pk, BigInt(newId), nick.trim(), fee);
+      markJoined(newId);
+      window.location.href = `/play?g=${newId}`; // pin the room to this game
       return;
     } catch (e: any) { setErr(e?.shortMessage ?? e?.message ?? "échec"); } finally { setBusy(""); }
   }
@@ -159,9 +161,10 @@ function Stepper({ label, v, set, min, max }: { label: string; v: number; set: (
 function Game({ burner, state, meIndex }: { burner: { pk: Hex; address: `0x${string}` }; state: Snap; meIndex: number }) {
   const g = state.game;
   const gid = String(state.gameId);
-  const host = getHostToken(gid);
+  const isCreator = burner.address.toLowerCase() === g.creator.toLowerCase();
   const [role, setRole] = useState<{ role: number; controllers: string[] } | null>(getRole(gid));
   const [busy, setBusy] = useState("");
+  const [err, setErr] = useState("");
   const [myWagon, setMyWagon] = useState<number | null>(null);
   const alive = state.alive[meIndex];
 
@@ -193,9 +196,25 @@ function Game({ burner, state, meIndex }: { burner: { pk: Hex; address: `0x${str
     try { await sendBoard(burner.pk, BigInt(gid), state.station, w); } catch {}
   }
 
-  async function hostAction(action: "start" | "settle") {
-    setBusy(action); try {
-      await fetch(`/api/${action}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ gameId: gid, hostToken: host }) });
+  // creator starts the game: fetch commitments from the server (hashes only), then startGame from own wallet
+  async function onStart() {
+    setBusy("start");
+    setErr("");
+    try {
+      const r = await fetch("/api/commits", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ gameId: gid }) });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error);
+      await sendStart(burner.pk, BigInt(gid), j.commits);
+    } catch (e: any) { setErr(e?.shortMessage ?? e?.message ?? "échec du départ"); } finally { setBusy(""); }
+  }
+
+  // creator settles: sign to prove creator, server pays the pot (it holds the salts)
+  async function onSettle() {
+    setBusy("settle");
+    try {
+      const w = walletFor(burner.pk);
+      const signature = await w.signMessage({ account: w.account!, message: `RER B — régler le pot\njeu #${gid}` });
+      await fetch("/api/settle", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ gameId: gid, address: burner.address, signature }) });
     } finally { setBusy(""); }
   }
 
@@ -222,13 +241,13 @@ function Game({ burner, state, meIndex }: { burner: { pk: Hex; address: `0x${str
 
       <div className="flex-1 flex flex-col min-h-0">
         <AnimatePresence mode="wait">
-          {g.started === false && <Lobby key="lobby" state={state} host={host} onStart={() => hostAction("start")} busy={busy} />}
+          {g.started === false && <Lobby key="lobby" state={state} isCreator={isCreator} onStart={onStart} busy={busy} err={err} />}
           {g.started && state.phase !== "ended" && (
             alive
               ? <PlayView key="play" state={state} meIndex={meIndex} myWagon={myWagon} onBoard={board} iAmController={iAmController} />
               : <Spectator key="spec" state={state} />
           )}
-          {state.phase === "ended" && <EndView key="end" state={state} meIndex={meIndex} host={host} onSettle={() => hostAction("settle")} busy={busy} />}
+          {state.phase === "ended" && <EndView key="end" state={state} meIndex={meIndex} isCreator={isCreator} onSettle={onSettle} busy={busy} />}
         </AnimatePresence>
       </div>
 
@@ -237,7 +256,7 @@ function Game({ burner, state, meIndex }: { burner: { pk: Hex; address: `0x${str
   );
 }
 
-function Lobby({ state, host, onStart, busy }: { state: Snap; host: string | null; onStart: () => void; busy: string }) {
+function Lobby({ state, isCreator, onStart, busy, err }: { state: Snap; isCreator: boolean; onStart: () => void; busy: string; err: string }) {
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col items-center gap-4 py-4">
       <div className="riso text-cream text-3xl">Sur le quai…</div>
@@ -250,12 +269,14 @@ function Lobby({ state, host, onStart, busy }: { state: Snap; host: string | nul
           </div>
         ))}
       </div>
-      {host ? (
+      {isCreator ? (
         <div className="flex flex-col items-center gap-2 mt-2">
           <a href={`/screen?g=${state.gameId}`} target="_blank" rel="noreferrer" className="btn bg-blue text-cream text-sm px-4 py-2 rounded-lg">Ouvrir le grand écran ↗</a>
           <button onClick={onStart} disabled={!!busy || state.game.playerCount < 2} className="btn bg-green text-ink text-2xl px-8 py-4 rounded-xl">
             {busy ? "…" : "LANCER LE TRAIN"}
           </button>
+          {state.game.playerCount < 2 && <div className="text-cream/60 text-xs">Il faut au moins 2 voyageurs</div>}
+          {err && <div className="text-vermilion text-sm font-bold">{err}</div>}
         </div>
       ) : (
         <div className="riso text-yellow text-xl animate-wobble mt-2">En attente de l&apos;hôte…</div>
@@ -326,7 +347,7 @@ function Spectator({ state }: { state: Snap }) {
   );
 }
 
-function EndView({ state, meIndex, host, onSettle, busy }: { state: Snap; meIndex: number; host: string | null; onSettle: () => void; busy: string }) {
+function EndView({ state, meIndex, isCreator, onSettle, busy }: { state: Snap; meIndex: number; isCreator: boolean; onSettle: () => void; busy: string }) {
   const settled = state.game.settled;
   const survived = state.alive[meIndex];
   const share = settled && state.survivorAddrs?.length ? Number(state.potMon) / state.survivorAddrs.length : 0;
@@ -341,12 +362,12 @@ function EndView({ state, meIndex, host, onSettle, busy }: { state: Snap; meInde
       ) : (
         <div className="riso text-vermilion text-5xl">Éliminé</div>
       )}
-      {!settled && host && (
+      {!settled && isCreator && (
         <button onClick={onSettle} disabled={!!busy} className="btn bg-vermilion text-cream text-xl px-6 py-3 rounded-xl">
           {busy ? "…" : "PARTAGER LE POT"}
         </button>
       )}
-      {!settled && !host && <div className="text-cream/60">En attente du partage du pot…</div>}
+      {!settled && !isCreator && <div className="text-cream/60">En attente du partage du pot…</div>}
       {settled && <div className="text-cream/70">{state.survivorAddrs?.length} survivant(s) se partagent {Number(state.potMon).toFixed(3)} MON</div>}
     </motion.div>
   );
