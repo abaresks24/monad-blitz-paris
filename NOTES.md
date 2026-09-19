@@ -34,9 +34,22 @@ which is the real keeper strategy to dodge single-account nonce serialization.
 - If ALL 20 receipts land in < ~6 s, a 12 s commit window is comfortable → proceed.
 - If not, fallbacks in order: (a) more sender keys, (b) longer commit window (config), (c) fewer bots.
 
-### RESULT
-**On real Monad Testnet: PENDING a funded GM key.** Run `cd keeper && npm run probe -- --n 20`
-and paste the verdict here. This is the only step that strictly needs the key before the demo.
+### RESULT — measured on real Monad Testnet (2026-09-19)
+Contract deployed live: **`0x49b178282ad9e83cc117e0412a5f0ad062f2198a`** (GM `0x2a9d…c7Aa`).
+- **The chain is fast** — `Ping` deploy mined in ~570 ms; individual txs confirm in ~1 block.
+- **The bottleneck is the public RPC, not Monad.** Blasting 20 parallel `sendRawTransaction`
+  from ONE sender to `testnet-rpc.monad.xyz` → **HTTP 429 (rate limit)**. Human phones are on
+  separate IPs so they're unaffected; the risk is the **keeper's 20 bots from one IP**.
+- **Fix applied & verified:** (1) bounded tx concurrency (`BOT_TX_CONCURRENCY`, default 5),
+  (2) retry with harder back-off on 429, (3) a **fallback RPC pool** (`testnet-rpc.monad.xyz`,
+  `10143.rpc.thirdweb.com`, `rpc.ankr.com/monad_testnet`) so 429s fail over automatically.
+- **Proof:** after the fix, a full **20-bot × 3-station** game ran to completion on Monad Testnet
+  — every station committed/revealed/resolved, correct fines & splits, roles revealed. Point
+  spread 280→40.
+
+**Verdict: 20 s stations with 20+ players are feasible on Monad.** For the live demo, add a
+dedicated RPC (Alchemy Monad) via `MONAD_RPC_URLS` for extra headroom; the pool + cached
+`/api/state` already keep the public endpoints within limits.
 
 **Proxy evidence (local anvil, 1 s blocks — mimics Monad's ~1 s cadence):** two full games ran
 clean end-to-end — **20 bots × 4 stations, 20/20 commit and 20/20 reveal every station**, plus a

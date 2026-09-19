@@ -16,6 +16,7 @@ import { dirname, join } from "node:path";
 import { encodeFunctionData, parseEther, formatEther, type Hex } from "viem";
 import { privateKeyToAccount, generatePrivateKey } from "viem/accounts";
 import { publicClient, monadTestnet, requireGmKey, walletFor, RPC_URL, CHAIN_ID } from "./chain.js";
+import { mapLimit } from "./client.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -85,20 +86,30 @@ async function main() {
     wallets.map((w) => publicClient.getTransactionCount({ address: w.acct.address }))
   );
 
+  const CONC = arg("conc", 5); // bounded concurrency (real keeper strategy vs public-RPC 429s)
+  console.log(`  (concurrency cap = ${CONC}; pass --conc N to change)`);
   const t0 = Date.now();
   const submitTimes: number[] = [];
-  const sends = Array.from({ length: N }, (_, i) => {
-    const w = wallets[i % SENDERS];
-    const nonce = nonces[i % SENDERS] + Math.floor(i / SENDERS);
-    return w.wallet
-      .sendTransaction({ to: contract, data: pingData, nonce })
-      .then((hash) => {
-        submitTimes.push(Date.now() - t0);
-        return hash;
-      });
-  });
-
-  const hashes = await Promise.all(sends);
+  const hashes = await mapLimit(
+    Array.from({ length: N }, (_, i) => i),
+    CONC,
+    async (i) => {
+      const w = wallets[i % SENDERS];
+      const nonce = nonces[i % SENDERS] + Math.floor(i / SENDERS);
+      for (let a = 0; a < 4; a++) {
+        try {
+          const hash = await w.wallet.sendTransaction({ to: contract, data: pingData, nonce });
+          submitTimes.push(Date.now() - t0);
+          return hash;
+        } catch (e: any) {
+          const msg = String(e?.shortMessage ?? e?.message ?? e);
+          if (a === 3) throw e;
+          await new Promise((r) => setTimeout(r, (/429|Too Many/i.test(msg) ? 800 : 300) * (a + 1)));
+        }
+      }
+      throw new Error("unreachable");
+    }
+  );
   const tAllSubmitted = Date.now() - t0;
   console.log(`All ${N} submitted (accepted by RPC) in ${tAllSubmitted} ms`);
 

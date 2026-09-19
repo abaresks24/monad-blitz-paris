@@ -1,7 +1,9 @@
 {
   "chainId": 10143,
   "rpc": "https://testnet-rpc.monad.xyz",
-  "contract": "PENDING_REAL_DEPLOY",
-  "note": "Run `cd keeper && npm run deploy` with a funded PRIVATE_KEY to fill this. Verified end-to-end on local anvil.",
-  "explorer": "https://testnet.monadexplorer.com/address/"
+  "contract": "0x49b178282ad9e83cc117e0412a5f0ad062f2198a",
+  "deployer": "0x2a9d3d608580df871E86eE1C161f1b5191c1c7Aa",
+  "deployTx": "0x810c89d46c67f5f61c66dabdcc511d1e48ec0ad6bf6c9637c7d59face5ff18bb",
+  "blockNumber": 63887656,
+  "explorer": "https://testnet.monadexplorer.com/address/0x49b178282ad9e83cc117e0412a5f0ad062f2198a"
 }

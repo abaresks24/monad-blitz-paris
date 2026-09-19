@@ -8,6 +8,20 @@ export function contractCfg(address: Address) {
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Run tasks with bounded concurrency (avoids RPC 429 from bursting all at once). */
+export async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, i: number) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let idx = 0;
+  async function worker() {
+    while (idx < items.length) {
+      const i = idx++;
+      out[i] = await fn(items[i], i);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
+
 /** Wait until a unix timestamp (seconds), using the local clock. */
 export async function waitUntil(unixSec: number, label = "") {
   const ms = unixSec * 1000 - Date.now();
@@ -45,12 +59,20 @@ export async function batchFromGM(
 ): Promise<Hex[]> {
   const wallet = walletFor(gmKey);
   const from = wallet.account!.address;
-  let nonce = await publicClient.getTransactionCount({ address: from });
-  const hashes = await Promise.all(
-    txs.map((t) =>
-      wallet.sendTransaction({ to: t.to, data: t.data, value: t.value, nonce: nonce++ } as any)
-    )
-  );
+  const baseNonce = await publicClient.getTransactionCount({ address: from });
+  // bounded concurrency + retry so a 40-tx burst doesn't 429 the public RPC
+  const hashes = await mapLimit(txs, 5, async (t, i) => {
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        return await wallet.sendTransaction({ to: t.to, data: t.data, value: t.value, nonce: baseNonce + i } as any);
+      } catch (e: any) {
+        const msg = String(e?.shortMessage ?? e?.message ?? e);
+        if (attempt === 3) throw e;
+        await sleep((/429|Too Many/i.test(msg) ? 800 : 300) * (attempt + 1));
+      }
+    }
+    throw new Error("unreachable");
+  });
   await Promise.all(hashes.map((h) => publicClient.waitForTransactionReceipt({ hash: h })));
   return hashes;
 }
@@ -83,7 +105,9 @@ export async function writeWithRetry(
       const msg = String(e?.shortMessage ?? e?.message ?? e);
       // window / already-done errors are terminal-ish: don't hammer
       if (/Already|Window|Committed|Revealed|Resolved/.test(msg)) return null;
-      await sleep(300 * (i + 1));
+      // back off harder on rate-limit (429)
+      const is429 = /429|Too Many Requests|rate limit/i.test(msg);
+      await sleep((is429 ? 700 : 300) * (i + 1));
     }
   }
   if (opts.label) console.warn(`  ⚠️ ${opts.label} failed: ${lastErr?.shortMessage ?? lastErr?.message}`);

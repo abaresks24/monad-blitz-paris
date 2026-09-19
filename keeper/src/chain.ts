@@ -1,10 +1,28 @@
-import "dotenv/config";
-import { createPublicClient, createWalletClient, http, defineChain } from "viem";
+import dotenv from "dotenv";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { createPublicClient, createWalletClient, http, fallback, defineChain } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import type { Hex } from "viem";
 
-export const RPC_URL = process.env.MONAD_RPC_URL ?? "https://testnet-rpc.monad.xyz";
+// load the single repo-root .env (keeper runs from keeper/, .env lives one level up)
+dotenv.config({ path: join(dirname(fileURLToPath(import.meta.url)), "../../.env") });
+
+// Pool of RPC endpoints — the keeper bursts many txs from one IP, so we fail over on 429.
+// Set MONAD_RPC_URLS (comma-separated) to add a dedicated endpoint (Alchemy) for headroom.
+const DEFAULT_POOL = [
+  "https://testnet-rpc.monad.xyz",
+  "https://10143.rpc.thirdweb.com",
+  "https://rpc.ankr.com/monad_testnet",
+];
+export const RPC_URLS = (process.env.MONAD_RPC_URLS ?? process.env.MONAD_RPC_URL ?? DEFAULT_POOL.join(","))
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+export const RPC_URL = RPC_URLS[0];
 export const CHAIN_ID = Number(process.env.MONAD_CHAIN_ID ?? 10143);
+
+const poolTransport = () => fallback(RPC_URLS.map((u) => http(u, { retryCount: 2 })), { rank: false });
 
 export const monadTestnet = defineChain({
   id: CHAIN_ID,
@@ -19,7 +37,7 @@ export const monadTestnet = defineChain({
 
 export const publicClient = createPublicClient({
   chain: monadTestnet,
-  transport: http(RPC_URL),
+  transport: poolTransport(),
 });
 
 export function requireGmKey(): Hex {
@@ -40,6 +58,6 @@ export function walletFor(pk: Hex) {
   return createWalletClient({
     account: privateKeyToAccount(pk),
     chain: monadTestnet,
-    transport: http(RPC_URL),
+    transport: poolTransport(),
   });
 }

@@ -1,10 +1,11 @@
 import { encodeFunctionData, parseEther, formatEther, type Address, type Hex } from "viem";
 import { publicClient } from "./chain.js";
-import { FraudeRERB_ABI, roleCommitFor, roleFor, roleSaltFor, Role } from "./game.js";
-import { batchFromGM, writeWithRetry, readContract, waitUntil, sleep } from "./client.js";
+import { FraudeRERB_ABI, roleCommitFor, roleFor, roleSaltFor, Role, commitHash } from "./game.js";
+import { batchFromGM, writeWithRetry, readContract, waitUntil, sleep, mapLimit } from "./client.js";
 import { botDecision, choiceSalt, type Bot } from "./bots.js";
 
-const MARGIN_MS = 800; // start a phase slightly inside its window
+// bounded concurrency so the keeper's bots (all one IP) don't 429 the public RPC
+const BOT_TX_CONCURRENCY = Number(process.env.BOT_TX_CONCURRENCY ?? 5);
 
 export type GameTimes = { commitStart: number; commitEnd: number; revealEnd: number };
 
@@ -57,35 +58,28 @@ export async function fundAndRegisterBots(
   );
 }
 
-/** All bots commit their choice for a station (parallel, each from its own account). */
+/** All bots commit their choice for a station (bounded concurrency, each from its own account). */
 export async function botsCommit(addr: Address, gameId: bigint, station: number, bots: Bot[], secret: string) {
-  const results = await Promise.all(
-    bots.map((b) => {
-      const { car, action } = botDecision(gameId, b, station);
-      const salt = choiceSalt(gameId, b.address, station, secret);
-      // compute hash off-chain and commit
-      return import("./game.js").then(({ commitHash }) =>
-        writeWithRetry(b.key, addr, "commit", [gameId, station, commitHash(car, action, salt, b.address, station)], {
-          label: `commit ${b.nickname}`,
-        })
-      );
-    })
-  );
+  const results = await mapLimit(bots, BOT_TX_CONCURRENCY, (b) => {
+    const { car, action } = botDecision(gameId, b, station);
+    const salt = choiceSalt(gameId, b.address, station, secret);
+    return writeWithRetry(b.key, addr, "commit", [gameId, station, commitHash(car, action, salt, b.address, station)], {
+      label: `commit ${b.nickname}`,
+    });
+  });
   return results.filter(Boolean).length;
 }
 
-/** All bots reveal for a station. */
+/** All bots reveal for a station (bounded concurrency). */
 export async function botsReveal(addr: Address, gameId: bigint, station: number, bots: Bot[], secret: string) {
-  const results = await Promise.all(
-    bots.map((b) => {
-      const { car, action } = botDecision(gameId, b, station);
-      const salt = choiceSalt(gameId, b.address, station, secret);
-      const roleSalt = b.role === Role.CONTROLEUR ? roleSaltFor(gameId, b.address, secret) : ("0x" + "0".repeat(64)) as Hex;
-      return writeWithRetry(b.key, addr, "reveal", [gameId, station, car, action, salt, roleSalt], {
-        label: `reveal ${b.nickname}`,
-      });
-    })
-  );
+  const results = await mapLimit(bots, BOT_TX_CONCURRENCY, (b) => {
+    const { car, action } = botDecision(gameId, b, station);
+    const salt = choiceSalt(gameId, b.address, station, secret);
+    const roleSalt = b.role === Role.CONTROLEUR ? roleSaltFor(gameId, b.address, secret) : (("0x" + "0".repeat(64)) as Hex);
+    return writeWithRetry(b.key, addr, "reveal", [gameId, station, car, action, salt, roleSalt], {
+      label: `reveal ${b.nickname}`,
+    });
+  });
   return results.filter(Boolean).length;
 }
 

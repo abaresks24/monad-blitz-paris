@@ -1,11 +1,21 @@
 import "server-only";
-import { createPublicClient, createWalletClient, http, defineChain, type Hex, type Address } from "viem";
+import { createPublicClient, createWalletClient, http, fallback, defineChain, type Hex, type Address } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import abi from "./abi.json";
 
 export const FraudeRERB_ABI = abi as any[];
 
-const RPC_URL = process.env.MONAD_RPC_URL ?? process.env.NEXT_PUBLIC_MONAD_RPC_URL ?? "https://testnet-rpc.monad.xyz";
+const DEFAULT_POOL = [
+  "https://testnet-rpc.monad.xyz",
+  "https://10143.rpc.thirdweb.com",
+  "https://rpc.ankr.com/monad_testnet",
+];
+const RPC_URLS = (process.env.MONAD_RPC_URLS ?? process.env.MONAD_RPC_URL ?? DEFAULT_POOL.join(","))
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+const RPC_URL = RPC_URLS[0];
+const poolTransport = () => fallback(RPC_URLS.map((u) => http(u, { retryCount: 2 })));
 const CHAIN_ID = Number(process.env.MONAD_CHAIN_ID ?? process.env.NEXT_PUBLIC_CHAIN_ID ?? 10143);
 export const CONTRACT = (process.env.CONTRACT_ADDRESS ?? process.env.NEXT_PUBLIC_CONTRACT_ADDRESS ?? "") as Address;
 export const MASTER_SECRET = process.env.MASTER_SECRET ?? "blitz-demo-secret";
@@ -21,7 +31,7 @@ export const serverChain = defineChain({
   testnet: true,
 });
 
-export const serverPublic = createPublicClient({ chain: serverChain, transport: http(RPC_URL) });
+export const serverPublic = createPublicClient({ chain: serverChain, transport: poolTransport() });
 
 export function gmKey(): Hex {
   const pk = process.env.PRIVATE_KEY;
@@ -32,7 +42,7 @@ export function gmKey(): Hex {
 }
 
 export function gmWallet() {
-  return createWalletClient({ account: privateKeyToAccount(gmKey()), chain: serverChain, transport: http(RPC_URL) });
+  return createWalletClient({ account: privateKeyToAccount(gmKey()), chain: serverChain, transport: poolTransport() });
 }
 
 export function gmAddress(): Address {
