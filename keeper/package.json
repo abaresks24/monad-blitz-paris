@@ -1,0 +1,20 @@
+{
+  "name": "rerb-keeper",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "probe": "tsx src/probe.ts",
+    "deploy": "tsx src/deploy.ts",
+    "keeper": "tsx src/keeper.ts",
+    "simulate": "tsx src/simulate.ts"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}
