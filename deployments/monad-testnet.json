@@ -1,9 +1,14 @@
 {
   "chainId": 10143,
   "rpc": "https://testnet-rpc.monad.xyz",
+  "rpcPool": [
+    "https://testnet-rpc.monad.xyz",
+    "https://10143.rpc.thirdweb.com",
+    "https://rpc.ankr.com/monad_testnet"
+  ],
   "contract": "0x49b178282ad9e83cc117e0412a5f0ad062f2198a",
-  "deployer": "0x2a9d3d608580df871E86eE1C161f1b5191c1c7Aa",
-  "deployTx": "0x810c89d46c67f5f61c66dabdcc511d1e48ec0ad6bf6c9637c7d59face5ff18bb",
-  "blockNumber": 63887656,
-  "explorer": "https://testnet.monadexplorer.com/address/0x49b178282ad9e83cc117e0412a5f0ad062f2198a"
+  "gameMaster": "0x2a9d3d608580df871E86eE1C161f1b5191c1c7Aa",
+  "explorer": "https://testnet.monadexplorer.com/address/0x49b178282ad9e83cc117e0412a5f0ad062f2198a",
+  "app": "https://monad-blitz-paris.vercel.app",
+  "verified": "Full 20-bot x 3-station game ran live on Monad testnet; app + APIs live on Vercel."
 }

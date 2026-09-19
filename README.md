@@ -159,10 +159,14 @@ The keeper always runs on your **laptop** (it holds bot keys and resolves statio
 
 ---
 
-## Deployed addresses
-See [`deployments/monad-testnet.json`](deployments/monad-testnet.json). Contract verified
-end-to-end on a local anvil (1 s blocks) — 20 bots × 4 stations, commit/reveal/resolve/finish with
-correct fines, splits, non-revealer handling and role reveal.
+## Deployed & live
+- **App:** https://monad-blitz-paris.vercel.app  (`/screen`, `/play`, `/admin?secret=…`)
+- **Contract (Monad Testnet):** [`0x49b178282ad9e83cc117e0412a5f0ad062f2198a`](https://testnet.monadexplorer.com/address/0x49b178282ad9e83cc117e0412a5f0ad062f2198a)
+- Full details in [`deployments/monad-testnet.json`](deployments/monad-testnet.json).
+
+Verified live on Monad Testnet — a full 20-bot × 3-station game ran end-to-end (commit / reveal /
+resolve / finish, correct fines, splits, non-revealer handling and role reveal), plus a mixed
+human+bot game through the deployed app. See `NOTES.md` for the M0 RPC finding and fix.
 
 ## Credits & disclaimer
 Parody project. **No official RATP / SNCF / Île-de-France Mobilités logo, font (Parisine) or jingle
