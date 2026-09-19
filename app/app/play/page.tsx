@@ -48,7 +48,7 @@ function MuteButton() {
       }}
       className="btn bg-cream text-ink text-xs px-3 py-1 rounded-lg"
     >
-      {on ? "♪ ON" : "♪ OFF"}
+      {on ? "SON" : "MUET"}
     </button>
   );
 }
@@ -114,7 +114,7 @@ function Entry({ burner, state }: { burner: { pk: Hex; address: `0x${string}` };
               <div className="text-sm font-sans normal-case">{g.playerCount}/{state.maxPlayers} • mise {feeMon} MON</div>
             </button>
           ) : (
-            <div className="card p-3 text-center text-sm">Partie #{gid} déjà lancée. Crée la tienne 👇</div>
+            <div className="card p-3 text-center text-sm">Partie #{gid} déjà lancée. Crée la tienne</div>
           )}
           <button onClick={() => setMode("create")} disabled={!!busy} className="btn bg-blue text-cream text-xl py-3 rounded-xl">
             Créer une partie
@@ -207,7 +207,7 @@ function Game({ burner, state, meIndex }: { burner: { pk: Hex; address: `0x${str
         <Passenger seed={getNick()} size={34} />
         <div className="flex-1 min-w-0">
           <div className="riso text-lg truncate">{getNick()}</div>
-          {role && <div className={`text-xs font-bold ${iAmController ? "text-vermilion" : "text-blue"}`}>{iAmController ? "🎩 CONTRÔLEUR" : "🚃 FRAUDEUR"}</div>}
+          {role && <div className={`text-xs font-bold ${iAmController ? "text-vermilion" : "text-blue"}`}>{iAmController ? "CONTRÔLEUR" : "FRAUDEUR"}</div>}
         </div>
         <div className="text-right">
           <div className="riso text-xl text-vermilion leading-none">{Number(state.potMon).toFixed(3)}</div>
@@ -217,7 +217,7 @@ function Game({ burner, state, meIndex }: { burner: { pk: Hex; address: `0x${str
       </header>
 
       {role && iAmController && role.controllers.length > 1 && state.phase !== "ended" && (
-        <div className="card-dark rounded-xl px-3 py-1.5 text-xs">🎩 Coéquipiers contrôleurs : {role.controllers.length} en tout (ne vous entassez pas dans le même wagon)</div>
+        <div className="card-dark rounded-xl px-3 py-1.5 text-xs">Coéquipiers contrôleurs : {role.controllers.length} en tout (ne vous entassez pas dans le même wagon)</div>
       )}
 
       <div className="flex-1 flex flex-col min-h-0">
@@ -315,7 +315,7 @@ function PlayView({ state, meIndex, myWagon, onBoard, iAmController }: { state: 
 function Spectator({ state }: { state: Snap }) {
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex-1 flex flex-col items-center justify-center text-center gap-3">
-      <div className="text-6xl opacity-60">👻</div>
+      <div className="text-6xl opacity-60"></div>
       <div className="riso text-cream text-3xl">Fantôme du RER</div>
       <p className="text-cream/70">Tu as été éliminé. Regarde qui s&apos;en sort…</p>
       <div className="card-dark rounded-xl px-4 py-2">
@@ -343,7 +343,7 @@ function EndView({ state, meIndex, host, onSettle, busy }: { state: Snap; meInde
       )}
       {!settled && host && (
         <button onClick={onSettle} disabled={!!busy} className="btn bg-vermilion text-cream text-xl px-6 py-3 rounded-xl">
-          {busy ? "…" : "PARTAGER LE POT 💰"}
+          {busy ? "…" : "PARTAGER LE POT"}
         </button>
       )}
       {!settled && !host && <div className="text-cream/60">En attente du partage du pot…</div>}
@@ -381,7 +381,7 @@ function ResultFlash({ state, meIndex }: { state: Snap; meIndex: number }) {
           ) : (
             <div className="text-center">
               <Passenger seed={getNick()} size={120} />
-              <div className="riso text-ink text-6xl mt-2">SAUVÉ 😮‍💨</div>
+              <div className="riso text-ink text-6xl mt-2">SAUVÉ</div>
             </div>
           )}
         </motion.div>

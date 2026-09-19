@@ -34,7 +34,7 @@ export default function Screen() {
   return (
     <Shell>
       <button onClick={() => { const n = !on; setOn(n); setSfxEnabled(n); if (n) startMusic(); else stopMusic(); }} className="absolute top-4 right-4 z-50 btn bg-cream text-ink px-4 py-2 rounded-lg text-sm">
-        {on ? "♪ SON ON" : "♪ ACTIVER LE SON"}
+        {on ? "SON : ON" : "ACTIVER LE SON"}
       </button>
       {state.game.started === false ? <Lobby state={state} baseUrl={baseUrl} /> : state.phase === "ended" ? <End state={state} /> : <Running state={state} on={on} />}
     </Shell>
@@ -180,7 +180,7 @@ function End({ state }: { state: Snap }) {
         {state.game.settled && <div className="riso text-yellow text-4xl mt-2">{share.toFixed(4)} MON chacun</div>}
       </div>
       <div className="flex flex-wrap gap-5 justify-center mt-8">
-        {survivors.length === 0 && <div className="riso text-vermilion text-4xl">Personne n&apos;a survécu 😈</div>}
+        {survivors.length === 0 && <div className="riso text-vermilion text-4xl">Personne n&apos;a survécu</div>}
         {survivors.map((r) => (
           <motion.div key={r.addr} initial={{ y: 60, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="flex flex-col items-center card p-4 rounded-2xl">
             <Passenger seed={r.nick} size={72} />

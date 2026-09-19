@@ -24,10 +24,10 @@ export default function Home() {
           Chacun est <b>fraudeur</b> ou <b>contrôleur</b> — personne ne sait qui.
         </p>
         <p>
-          🚃 <b>Fraudeurs</b> : montez dans un wagon et priez pour éviter les contrôleurs.
+          <b className="text-blue">Fraudeurs</b> : montez dans un wagon et priez pour éviter les contrôleurs.
         </p>
         <p>
-          🎩 <b>Contrôleurs</b> : coincez les fraudeurs de votre wagon. Ils sont éliminés.
+          <b className="text-vermilion">Contrôleurs</b> : coincez les fraudeurs de votre wagon. Ils sont éliminés.
         </p>
         <p className="text-vermilion font-bold">Les survivants raflent tout le pot à l&apos;arrivée.</p>
       </div>
